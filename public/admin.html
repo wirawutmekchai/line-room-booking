@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบจัดการห้องประชุม - Admin Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8">
+  <div class="max-w-6xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-gray-200 gap-4">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-800">🛡️ Admin Dashboard</h1>
+        <p class="text-sm text-gray-500">จัดการข้อมูลการจองห้องประชุมทั้งหมด</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <input type="password" id="admin_key" placeholder="ใส่รหัส Admin PIN" class="p-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <button onclick="loadBookings()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+          เข้าสู่ระบบ / รีเฟรช
+        </button>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 my-6">
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">กรองตามห้องประชุม</label>
+        <select id="filter_room" onchange="renderTable()" class="w-full p-2 border rounded-lg bg-white text-sm">
+          <option value="">ทั้งหมดทุกห้อง</option>
+          <option value="R1">ห้องทุ่งรวงเงิน (ห้องเล็ก)</option>
+          <option value="R2">ห้องทุ่งรวงทอง (ห้องใหญ่)</option>
+          <option value="R_ALL">ห้องทุ่งประกายเพชร (รวม 1+2)</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">กรองตามสถานะ</label>
+        <select id="filter_status" onchange="renderTable()" class="w-full p-2 border rounded-lg bg-white text-sm">
+          <option value="">ทุกสถานะ</option>
+          <option value="confirmed">ยืนยันแล้ว</option>
+          <option value="cancelled">ยกเลิกแล้ว</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">ค้นหา (ชื่อผู้จอง / หัวข้อ)</label>
+        <input type="text" id="filter_search" oninput="renderTable()" placeholder="พิมพ์คำค้นหา..." class="w-full p-2 border rounded-lg text-sm">
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="bg-white rounded-xl shadow overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 text-left text-sm">
+        <thead class="bg-gray-100 text-gray-700 font-semibold">
+          <tr>
+            <th class="py-3 px-4">วันที่</th>
+            <th class="py-3 px-4">เวลา</th>
+            <th class="py-3 px-4">ห้องประชุม</th>
+            <th class="py-3 px-4">หัวข้อ</th>
+            <th class="py-3 px-4">ผู้จอง</th>
+            <th class="py-3 px-4">สถานะ</th>
+            <th class="py-3 px-4 text-center">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="booking_rows" class="divide-y divide-gray-100 text-gray-600">
+          <tr>
+            <td colspan="7" class="text-center py-8 text-gray-400">กรุณาใส่รหัส Admin PIN แล้วกด เข้าสู่ระบบ เพื่อโหลดข้อมูล</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let rawBookings = [];
+    const ROOM_NAMES = {
+      'R1': 'ห้องทุ่งรวงเงิน (ห้องเล็ก)',
+      'R2': 'ห้องทุ่งรวงทอง (ห้องใหญ่)',
+      'R_ALL': 'ห้องทุ่งประกายเพชร (รวม 1+2)'
+    };
+
+    function formatTime(str) {
+      if (!str) return '';
+      const part = str.includes('T') ? str.split('T')[1] : str.split(' ')[1];
+      return part.substring(0, 5);
+    }
+
+    function formatDate(str) {
+      if (!str) return '';
+      return new Date(str).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    async function loadBookings() {
+      const key = document.getElementById('admin_key').value.trim();
+      if (!key) return alert('กรุณาระบุรหัส Admin PIN');
+
+      try {
+        const res = await fetch(`/api/admin/bookings?key=${encodeURIComponent(key)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || 'รหัสผ่านไม่ถูกต้อง');
+          return;
+        }
+        rawBookings = data.bookings;
+        renderTable();
+      } catch (err) {
+        alert('เกิดข้อผิดพลาดในการดึงข้อมูล');
+      }
+    }
+
+    function renderTable() {
+      const room = document.getElementById('filter_room').value;
+      const status = document.getElementById('filter_status').value;
+      const search = document.getElementById('filter_search').value.toLowerCase();
+      const tbody = document.getElementById('booking_rows');
+
+      const filtered = rawBookings.filter(b => {
+        if (room && b.room_id !== room) return false;
+        if (status && b.status !== status) return false;
+        if (search && !b.title.toLowerCase().includes(search) && !b.user_name.toLowerCase().includes(search)) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-gray-400">ไม่พบรายการข้อมูล</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(b => {
+        const isConfirmed = b.status === 'confirmed';
+        return `
+          <tr class="hover:bg-gray-50 transition">
+            <td class="py-3 px-4">${formatDate(b.start_time)}</td>
+            <td class="py-3 px-4 font-semibold text-gray-800">${formatTime(b.start_time)} - ${formatTime(b.end_time)} น.</td>
+            <td class="py-3 px-4">${ROOM_NAMES[b.room_id] || b.room_id}</td>
+            <td class="py-3 px-4 font-medium text-gray-900">${b.title}</td>
+            <td class="py-3 px-4">${b.user_name}</td>
+            <td class="py-3 px-4">
+              <span class="px-2.5 py-1 text-xs rounded-full font-semibold ${isConfirmed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                ${isConfirmed ? 'ยืนยันแล้ว' : 'ยกเลิกแล้ว'}
+              </span>
+            </td>
+            <td class="py-3 px-4 text-center">
+              ${isConfirmed ? `
+                <button onclick="cancelBooking('${b.id}', '${b.title}')" class="bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1.5 rounded transition">
+                  ยกเลิก
+                </button>
+              ` : '<span class="text-xs text-gray-400">-</span>'}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function cancelBooking(id, title) {
+      if (!confirm(`ยืนยันการยกเลิกการจองหัวข้อ "${title}" หรือไม่?`)) return;
+      const key = document.getElementById('admin_key').value.trim();
+
+      try {
+        const res = await fetch(`/api/admin/bookings/${id}/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || 'ยกเลิกไม่สำเร็จ');
+        } else {
+          alert('✅ ยกเลิกรายการจองเรียบร้อยแล้ว');
+          loadBookings();
+        }
+      } catch (err) {
+        alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+      }
+    }
+  </script>
+</body>
+</html>
