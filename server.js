@@ -29,21 +29,22 @@ const ROOM_NAMES = {
   'R_ALL': 'ห้องทุ่งประกายเพชร (รวม 1+2)'
 };
 
-// ฟังก์ชันจัดรูปแบบเวลาเป็น 24 ชม. (HH:mm) ตามเวลาไทย
-function formatThaiTime(dateStr) {
-  return new Date(dateStr).toLocaleTimeString('th-TH', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Asia/Bangkok'
-  });
+// ฟังก์ชันดึงเวลา HH:mm แสดงผลตรงๆ โดยไม่โดน Timezone เลื่อนซ้ำ
+function formatThaiTime(dateInput) {
+  if (!dateInput) return '';
+  const str = typeof dateInput === 'string' ? dateInput : dateInput.toISOString();
+  const timePart = str.includes('T') ? str.split('T')[1] : str.split(' ')[1];
+  return timePart.substring(0, 5);
 }
 
-// ฟังก์ชันจัดรูปแบบวันที่ตามเวลาไทย
-function formatThaiDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString('th-TH', {
-    dateStyle: 'medium',
-    timeZone: 'Asia/Bangkok'
+// ฟังก์ชันจัดรูปแบบวันที่ภาษาไทย
+function formatThaiDate(dateInput) {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  return d.toLocaleDateString('th-TH', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
   });
 }
 
