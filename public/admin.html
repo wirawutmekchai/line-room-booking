@@ -22,7 +22,7 @@
       </div>
     </div>
 
-    <!-- Filters: ปรับแบ่งเป็น 4 คอลัมน์ รองรับการกรองตามวันที่ -->
+    <!-- Filters -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-6">
       <div>
         <label class="block text-xs font-semibold text-gray-600 mb-1">กรองตามห้องประชุม</label>
@@ -37,7 +37,8 @@
         <label class="block text-xs font-semibold text-gray-600 mb-1">กรองตามสถานะ</label>
         <select id="filter_status" onchange="renderTable()" class="w-full p-2 border rounded-lg bg-white text-sm">
           <option value="">ทุกสถานะ</option>
-          <option value="confirmed">ยืนยันแล้ว</option>
+          <option value="confirmed">ยืนยันแล้ว (ยังไม่เริ่ม/กำลังประชุม)</option>
+          <option value="completed">เสร็จสิ้นแล้ว</option>
           <option value="cancelled">ยกเลิกแล้ว</option>
         </select>
       </div>
@@ -127,16 +128,26 @@
 
     function renderTable() {
       const room = document.getElementById('filter_room').value;
-      const status = document.getElementById('filter_status').value;
+      const statusFilter = document.getElementById('filter_status').value;
       const selectedDate = document.getElementById('filter_date').value;
       const search = document.getElementById('filter_search').value.toLowerCase();
       const tbody = document.getElementById('booking_rows');
 
+      const nowThaiStr = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }).replace(' ', 'T');
+
       const filtered = rawBookings.filter(b => {
         if (room && b.room_id !== room) return false;
-        if (status && b.status !== status) return false;
+
+        const isPast = b.end_time < nowThaiStr;
+
+        if (statusFilter === 'confirmed') {
+          if (b.status !== 'confirmed' || isPast) return false;
+        } else if (statusFilter === 'completed') {
+          if (b.status !== 'confirmed' || !isPast) return false;
+        } else if (statusFilter === 'cancelled') {
+          if (b.status !== 'cancelled') return false;
+        }
         
-        // กรองตามวันที่ YYYY-MM-DD
         if (selectedDate && extractISODate(b.start_time) !== selectedDate) {
           return false;
         }
@@ -159,6 +170,17 @@
 
       tbody.innerHTML = filtered.map(b => {
         const isConfirmed = b.status === 'confirmed';
+        const isPast = b.end_time < nowThaiStr;
+
+        let badgeHtml = '';
+        if (b.status === 'cancelled') {
+          badgeHtml = '<span class="px-2.5 py-1 text-xs rounded-full font-semibold bg-red-100 text-red-700">ยกเลิกแล้ว</span>';
+        } else if (isPast) {
+          badgeHtml = '<span class="px-2.5 py-1 text-xs rounded-full font-semibold bg-gray-100 text-gray-600">เสร็จสิ้นแล้ว</span>';
+        } else {
+          badgeHtml = '<span class="px-2.5 py-1 text-xs rounded-full font-semibold bg-green-100 text-green-700">ยืนยันแล้ว</span>';
+        }
+
         return `
           <tr class="hover:bg-gray-50 transition">
             <td class="py-3 px-4">${formatDate(b.start_time)}</td>
@@ -166,17 +188,13 @@
             <td class="py-3 px-4">${ROOM_NAMES[b.room_id] || b.room_id}</td>
             <td class="py-3 px-4 font-medium text-gray-900">${b.title}</td>
             <td class="py-3 px-4">${b.user_name}</td>
-            <td class="py-3 px-4">
-              <span class="px-2.5 py-1 text-xs rounded-full font-semibold ${isConfirmed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
-                ${isConfirmed ? 'ยืนยันแล้ว' : 'ยกเลิกแล้ว'}
-              </span>
-            </td>
+            <td class="py-3 px-4">${badgeHtml}</td>
             <td class="py-3 px-4 text-xs font-medium ${b.cancelled_by ? 'text-red-600' : 'text-gray-400'}">
               ${b.cancelled_by || '-'}
             </td>
             <td class="py-3 px-4 text-center">
-              ${isConfirmed ? `
-                <button onclick="cancelBooking('${b.id}', '${b.title}')" class="bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1.5 rounded transition">
+              ${isConfirmed && !isPast ? `
+                <button onclick="cancelBooking('${b.id}', '${b.title}')" class="bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1.5 rounded transition shadow-sm">
                   ยกเลิก
                 </button>
               ` : '<span class="text-xs text-gray-400">-</span>'}
