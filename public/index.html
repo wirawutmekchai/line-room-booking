@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>จองห้องประชุม</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-4">
+  <div class="max-w-md mx-auto bg-white rounded-xl shadow-md p-6">
+    <h1 class="text-2xl font-bold text-gray-800 mb-2">จองห้องประชุม</h1>
+    <div id="user-info" class="text-sm text-gray-500 mb-6">กำลังโหลดข้อมูลผู้ใช้...</div>
+
+    <form id="booking-form" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700">หัวข้อการประชุม</label>
+        <input type="text" id="title" required placeholder="เช่น ประชุมวางแผนทีม" class="mt-1 w-full p-2 border rounded-lg focus:ring focus:ring-green-300">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700">เลือกห้องประชุม</label>
+        <select id="room_id" class="mt-1 w-full p-2 border rounded-lg bg-white">
+          <option value="R1">ห้อง 1 (ห้องเล็ก)</option>
+          <option value="R2">ห้อง 2 (ห้องเล็ก)</option>
+          <option value="R_ALL">ห้องใหญ่ (รวมห้อง 1 + 2)</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700">วันที่</label>
+        <input type="date" id="booking_date" required class="mt-1 w-full p-2 border rounded-lg">
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">เวลาเริ่ม</label>
+          <input type="time" id="start_time" required class="mt-1 w-full p-2 border rounded-lg">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">เวลาสิ้นสุด</label>
+          <input type="time" id="end_time" required class="mt-1 w-full p-2 border rounded-lg">
+        </div>
+      </div>
+
+      <button type="submit" id="btn-submit" class="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-semibold py-3 rounded-lg shadow transition">
+        ยืนยันการจอง
+      </button>
+    </form>
+  </div>
+
+  <script>
+    // ** ใส่ LIFF ID ที่ได้จาก Step 2 ที่นี่ **
+    const MY_LIFF_ID = "2012070438-neRmVlKc";
+    let currentUser = null;
+
+    async function init() {
+      // ตั้งค่าวันที่เริ่มต้นเป็นวันนี้
+      document.getElementById('booking_date').value = new Date().toISOString().split('T')[0];
+
+      try {
+        await liff.init({ liffId: MY_LIFF_ID });
+        if (!liff.isLoggedIn()) {
+          liff.login();
+          return;
+        }
+        currentUser = await liff.getProfile();
+        document.getElementById('user-info').innerText = `👤 ผู้จอง: ${currentUser.displayName}`;
+      } catch (err) {
+        document.getElementById('user-info').innerText = `เข้าสู่ระบบ LINE ไม่สำเร็จ: ${err.message}`;
+      }
+    }
+
+    document.getElementById('booking-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!currentUser) return alert('กรุณารอโหลดข้อมูลผู้ใช้สักครู่');
+
+      const date = document.getElementById('booking_date').value;
+      const startTime = document.getElementById('start_time').value;
+      const endTime = document.getElementById('end_time').value;
+
+      const payload = {
+        user_line_id: currentUser.userId,
+        user_name: currentUser.displayName,
+        room_id: document.getElementById('room_id').value,
+        title: document.getElementById('title').value,
+        start_time: `${date}T${startTime}:00`,
+        end_time: `${date}T${endTime}:00`
+      };
+
+      const btn = document.getElementById('btn-submit');
+      btn.disabled = true;
+      btn.innerText = 'กำลังตรวจสอบห้อง...';
+
+      try {
+        const res = await fetch('/api/bookings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          alert('❌ ' + data.error);
+        } else {
+          alert('✅ จองห้องสำเร็จ! ข้อความยืนยันถูกส่งไปยังแชต LINE ของคุณแล้ว');
+          liff.closeWindow(); // ปิดหน้าต่าง LIFF กลับเข้าแชต LINE
+        }
+      } catch (err) {
+        alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'ยืนยันการจอง';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
