@@ -32,16 +32,22 @@
         <input type="date" id="booking_date" required class="mt-1 w-full p-2 border rounded-lg">
       </div>
 
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700">เวลาเริ่ม</label>
-          <input type="time" id="start_time" required class="mt-1 w-full p-2 border rounded-lg">
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700">เวลาสิ้นสุด</label>
-          <input type="time" id="end_time" required class="mt-1 w-full p-2 border rounded-lg">
-        </div>
-      </div>
+    <div style="display: flex; gap: 12px;">
+  <div style="flex: 1;">
+    <label for="start_time_select">เวลาเริ่ม</label>
+    <select id="start_time_select" required>
+      <option value="">-- เลือกเวลาเริ่ม --</option>
+      <!-- ตัวเลือก 24 ชม. ล็อกนาที 00 และ 30 -->
+    </select>
+  </div>
+  <div style="flex: 1;">
+    <label for="end_time_select">เวลาสิ้นสุด</label>
+    <select id="end_time_select" required>
+      <option value="">-- เลือกเวลาสิ้นสุด --</option>
+      <!-- ตัวเลือก 24 ชม. ล็อกนาที 00 และ 30 -->
+    </select>
+  </div>
+</div>
 
       <button type="submit" id="btn-submit" class="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-semibold py-3 rounded-lg shadow transition">
         ยืนยันการจอง
@@ -50,6 +56,80 @@
   </div>
 
   <script>
+    // ฟังก์ชันสร้างตัวเลือกเวลา 08:00 - 20:00 (นาที 00 และ 30)
+function populateTimeOptions() {
+  const startSelect = document.getElementById('start_time_select');
+  const endSelect = document.getElementById('end_time_select');
+  const times = [];
+
+  for (let h = 8; h <= 20; h++) {
+    const hh = String(h).padStart(2, '0');
+    times.push(`${hh}:00`);
+    if (h < 20) {
+      times.push(`${hh}:30`);
+    }
+  }
+
+  times.forEach(t => {
+    startSelect.add(new Option(t + ' น.', t));
+    endSelect.add(new Option(t + ' น.', t));
+  });
+}
+
+// เรียกทำงานเมื่อเปิดหน้าเว็บ
+populateTimeOptions();
+
+// ตอนกด Submit จองห้อง
+document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const bookingDate = document.getElementById('booking_date').value; // เช่น 2026-10-24
+  const startTimeVal = document.getElementById('start_time_select').value; // เช่น 10:00
+  const endTimeVal = document.getElementById('end_time_select').value;     // เช่น 11:30
+
+  if (!startTimeVal || !endTimeVal) {
+    alert('กรุณาเลือกเวลาเริ่มและเวลาสิ้นสุด');
+    return;
+  }
+
+  if (startTimeVal >= endTimeVal) {
+    alert('เวลาสิ้นสุดต้องมากกว่าเวลาเริ่มต้น');
+    return;
+  }
+
+  // กำหนด Timezone ประเทศไทย (+07:00) ให้ชัดเจน
+  const fullStartTime = `${bookingDate}T${startTimeVal}:00+07:00`;
+  const fullEndTime = `${bookingDate}T${endTimeVal}:00+07:00`;
+
+  const payload = {
+    user_line_id: userProfile ? userProfile.userId : 'TEST_USER',
+    user_name: userProfile ? userProfile.displayName : 'ผู้ใช้ทดสอบ',
+    room_id: document.getElementById('room_id').value,
+    title: document.getElementById('title').value,
+    start_time: fullStartTime,
+    end_time: fullEndTime
+  };
+
+  try {
+    const res = await fetch('/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'เกิดข้อผิดพลาดในการจอง');
+    } else {
+      alert('✅ จองห้องประชุมสำเร็จเรียบร้อยแล้ว');
+      if (typeof liff !== 'undefined' && liff.closeWindow) {
+        liff.closeWindow();
+      }
+    }
+  } catch (err) {
+    alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+  }
+});
     // ** ใส่ LIFF ID ที่ได้จาก Step 2 ที่นี่ **
     const MY_LIFF_ID = "2012070438-neRmVlKc";
     let currentUser = null;
