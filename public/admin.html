@@ -22,8 +22,8 @@
       </div>
     </div>
 
-    <!-- Filters -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 my-6">
+    <!-- Filters: ปรับแบ่งเป็น 4 คอลัมน์ รองรับการกรองตามวันที่ -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-6">
       <div>
         <label class="block text-xs font-semibold text-gray-600 mb-1">กรองตามห้องประชุม</label>
         <select id="filter_room" onchange="renderTable()" class="w-full p-2 border rounded-lg bg-white text-sm">
@@ -40,6 +40,13 @@
           <option value="confirmed">ยืนยันแล้ว</option>
           <option value="cancelled">ยกเลิกแล้ว</option>
         </select>
+      </div>
+      <div>
+        <div class="flex justify-between items-center mb-1">
+          <label class="block text-xs font-semibold text-gray-600">กรองตามวันที่</label>
+          <button type="button" onclick="clearDateFilter()" class="text-[11px] text-blue-600 hover:underline">ล้างวันที่</button>
+        </div>
+        <input type="date" id="filter_date" onchange="renderTable()" class="w-full p-2 border rounded-lg bg-white text-sm">
       </div>
       <div>
         <label class="block text-xs font-semibold text-gray-600 mb-1">ค้นหา (ชื่อผู้จอง / ผู้ยกเลิก / หัวข้อ)</label>
@@ -90,6 +97,16 @@
       return new Date(str).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
+    function extractISODate(str) {
+      if (!str) return '';
+      return str.includes('T') ? str.split('T')[0] : str.split(' ')[0];
+    }
+
+    function clearDateFilter() {
+      document.getElementById('filter_date').value = '';
+      renderTable();
+    }
+
     async function loadBookings() {
       const key = document.getElementById('admin_key').value.trim();
       if (!key) return alert('กรุณาระบุรหัส Admin PIN');
@@ -111,12 +128,19 @@
     function renderTable() {
       const room = document.getElementById('filter_room').value;
       const status = document.getElementById('filter_status').value;
+      const selectedDate = document.getElementById('filter_date').value;
       const search = document.getElementById('filter_search').value.toLowerCase();
       const tbody = document.getElementById('booking_rows');
 
       const filtered = rawBookings.filter(b => {
         if (room && b.room_id !== room) return false;
         if (status && b.status !== status) return false;
+        
+        // กรองตามวันที่ YYYY-MM-DD
+        if (selectedDate && extractISODate(b.start_time) !== selectedDate) {
+          return false;
+        }
+
         if (search) {
           const title = (b.title || '').toLowerCase();
           const user = (b.user_name || '').toLowerCase();
