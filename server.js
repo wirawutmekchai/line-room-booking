@@ -17,6 +17,9 @@ const lineConfig = {
 };
 const lineClient = new line.messagingApi.MessagingApiClient(lineConfig);
 
+// รายชื่อ LINE User ID ของผู้ดูแลระบบ (คั่นด้วยเครื่องหมายจุลภาค ,)
+const ADMIN_IDS = (process.env.ADMIN_LINE_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+
 const CONFLICT_RULES = {
   'R1': ['R1', 'R_ALL'],
   'R2': ['R2', 'R_ALL'],
@@ -29,7 +32,7 @@ const ROOM_NAMES = {
   'R_ALL': 'ห้องทุ่งประกายเพชร (รวม 1+2)'
 };
 
-// ฟังก์ชันดึงเวลา HH:mm แสดงผลตรงๆ โดยไม่โดน Timezone เลื่อนซ้ำ
+// ฟังก์ชันดึงเวลา HH:mm แสดงผลตรงๆ
 function formatThaiTime(dateInput) {
   if (!dateInput) return '';
   const str = typeof dateInput === 'string' ? dateInput : dateInput.toISOString();
@@ -49,7 +52,7 @@ function formatThaiDate(dateInput) {
 }
 
 // ----------------------------------------------------
-// 1. ฟังก์ชัน Flex Message: ดูตารางห้องวันนี้
+// 1. Flex Message: ดูตารางห้องวันนี้ (สำหรับทุกคน)
 // ----------------------------------------------------
 async function getTodayScheduleFlex() {
   const query = `
@@ -120,7 +123,7 @@ async function getTodayScheduleFlex() {
 }
 
 // ----------------------------------------------------
-// 2. ฟังก์ชัน Flex Message: ดูรายการจองของตนเองเพื่อยกเลิก
+// 2. Flex Message: ดูรายการจองของตนเองเพื่อยกเลิก (ยูสเซอร์ทั่วไป)
 // ----------------------------------------------------
 async function getMyBookingsFlex(userId) {
   const query = `
@@ -130,7 +133,7 @@ async function getMyBookingsFlex(userId) {
       AND user_line_id = $1
       AND end_time >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
     ORDER BY start_time ASC
-    LIMIT 5;
+    LIMIT 10;
   `;
   const result = await pool.query(query, [userId]);
   const bookings = result.rows;
@@ -197,15 +200,105 @@ async function getMyBookingsFlex(userId) {
 }
 
 // ----------------------------------------------------
-// 3. Webhook จัดการ Event ของ LINE
+// 3. Flex Message: ดูรายการจองทั้งหมด (สำหรับ ADMIN เท่านั้น)
+// ----------------------------------------------------
+async function getAdminAllBookingsFlex() {
+  const query = `
+    SELECT id, room_id, title, user_name, start_time, end_time
+    FROM bookings
+    WHERE status = 'confirmed'
+      AND end_time >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
+    ORDER BY start_time ASC
+    LIMIT 10;
+  `;
+  const result = await pool.query(query);
+  const bookings = result.rows;
+
+  if (bookings.length === 0) {
+    return {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          { type: 'text', text: '🛡️ เมนูผู้ดูแลระบบ (Admin)', weight: 'bold', size: 'lg', color: '#0055FF' },
+          { type: 'separator', margin: 'md' },
+          { type: 'text', text: 'ไม่มีรายการจองค้างอยู่ในระบบครับ', margin: 'lg', color: '#666666', wrap: true }
+        ]
+      }
+    };
+  }
+
+  const bubbles = bookings.map((b) => {
+    const sTime = formatThaiTime(b.start_time);
+    const eTime = formatThaiTime(b.end_time);
+    const bDate = formatThaiDate(b.start_time);
+
+    return {
+      type: 'bubble',
+      size: 'kilo',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          { type: 'text', text: '🛡️ จัดการการจอง (Admin)', weight: 'bold', size: 'sm', color: '#0055FF' },
+          { type: 'text', text: b.title, weight: 'bold', size: 'md', margin: 'sm' },
+          { type: 'separator', margin: 'sm' },
+          { type: 'text', text: `👤 ผู้จอง: ${b.user_name}`, size: 'xs', weight: 'bold', color: '#333333', margin: 'sm' },
+          { type: 'text', text: `📍 ห้อง: ${ROOM_NAMES[b.room_id]}`, size: 'xs', color: '#444444' },
+          { type: 'text', text: `📅 วันที่: ${bDate}`, size: 'xs', color: '#666666' },
+          { type: 'text', text: `⏰ เวลา: ${sTime} - ${eTime} น.`, size: 'xs', color: '#666666' }
+        ]
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          {
+            type: 'button',
+            style: 'secondary',
+            color: '#FF4B4B',
+            height: 'sm',
+            action: {
+              type: 'postback',
+              label: 'ยกเลิกคิวนี้ (Admin)',
+              data: `action=admin_cancel&booking_id=${b.id}`
+            }
+          }
+        ]
+      }
+    };
+  });
+
+  return {
+    type: 'carousel',
+    contents: bubbles
+  };
+}
+
+// ----------------------------------------------------
+// 4. Webhook จัดการ Event ของ LINE
 // ----------------------------------------------------
 app.post('/webhook', express.json(), async (req, res) => {
   res.status(200).send('OK');
 
   const events = req.body.events || [];
   for (const event of events) {
+    const userId = event.source.userId;
+
     if (event.type === 'message' && event.message.type === 'text') {
       const text = event.message.text.trim();
+
+      if (text.toLowerCase() === 'myid') {
+        await lineClient.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{
+            type: 'text',
+            text: `LINE User ID ของคุณคือ:\n${userId}`
+          }]
+        });
+        continue;
+      }
 
       if (['เช็กห้อง', 'เช็คห้อง', 'ตารางห้อง', 'ดูห้อง', 'มีห้องว่างไหม'].some(kw => text.includes(kw))) {
         const flex = await getTodayScheduleFlex();
@@ -214,20 +307,36 @@ app.post('/webhook', express.json(), async (req, res) => {
           messages: [{ type: 'flex', altText: 'ตารางการจองห้องประชุมวันนี้', contents: flex }]
         });
       } else if (['ยกเลิก', 'ยกเลิกห้อง', 'ยกเลิกการจอง'].some(kw => text.includes(kw))) {
-        const flex = await getMyBookingsFlex(event.source.userId);
+        const flex = await getMyBookingsFlex(userId);
         await lineClient.replyMessage({
           replyToken: event.replyToken,
           messages: [{ type: 'flex', altText: 'รายการจองของคุณ', contents: flex }]
         });
+      } else if (['จัดการห้อง', 'ตารางทั้งหมด', 'admin', 'ดูคิวทั้งหมด'].some(kw => text.toLowerCase().includes(kw))) {
+        if (!ADMIN_IDS.includes(userId)) {
+          await lineClient.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{
+              type: 'text',
+              text: '⚠️ บัญชีนี้ไม่มีสิทธิ์เข้าถึงเมนูผู้ดูแลระบบ (Admin) ครับ'
+            }]
+          });
+        } else {
+          const flex = await getAdminAllBookingsFlex();
+          await lineClient.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{ type: 'flex', altText: 'รายการจองทั้งหมด (Admin)', contents: flex }]
+          });
+        }
       }
     }
 
     if (event.type === 'postback') {
       const params = new URLSearchParams(event.postback.data);
-      if (params.get('action') === 'cancel') {
-        const bookingId = params.get('booking_id');
-        const userId = event.source.userId;
+      const action = params.get('action');
+      const bookingId = params.get('booking_id');
 
+      if (action === 'cancel') {
         const updateResult = await pool.query(
           `UPDATE bookings SET status = 'cancelled' 
            WHERE id = $1 AND user_line_id = $2 AND status = 'confirmed' 
@@ -247,10 +356,50 @@ app.post('/webhook', express.json(), async (req, res) => {
         } else {
           await lineClient.replyMessage({
             replyToken: event.replyToken,
+            messages: [{ type: 'text', text: '⚠️ ไม่พบรายการจอง หรือรายการนี้ถูกยกเลิกไปแล้วครับ' }]
+          });
+        }
+      }
+
+      if (action === 'admin_cancel') {
+        if (!ADMIN_IDS.includes(userId)) {
+          await lineClient.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{ type: 'text', text: '⚠️ คุณไม่มีสิทธิ์ยกเลิกรายการนี้ครับ' }]
+          });
+          continue;
+        }
+
+        const updateResult = await pool.query(
+          `UPDATE bookings SET status = 'cancelled' 
+           WHERE id = $1 AND status = 'confirmed' 
+           RETURNING *;`,
+          [bookingId]
+        );
+
+        if (updateResult.rows.length > 0) {
+          const item = updateResult.rows[0];
+          await lineClient.replyMessage({
+            replyToken: event.replyToken,
             messages: [{
               type: 'text',
-              text: '⚠️ ไม่พบรายการจอง หรือรายการนี้ถูกยกเลิกไปแล้วครับ'
+              text: `🛡️ [Admin] ทำการยกเลิกเรียบร้อยแล้ว:\nผู้จอง: ${item.user_name}\nห้อง: ${ROOM_NAMES[item.room_id]}\nหัวข้อ: ${item.title}`
             }]
+          });
+
+          if (item.user_line_id && item.user_line_id !== userId) {
+            lineClient.pushMessage({
+              to: item.user_line_id,
+              messages: [{
+                type: 'text',
+                text: `⚠️ แจ้งเตือน: รายการจอง "${item.title}" (${ROOM_NAMES[item.room_id]}) ของคุณถูกยกเลิกโดยผู้ดูแลระบบครับ`
+              }]
+            }).catch(console.error);
+          }
+        } else {
+          await lineClient.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{ type: 'text', text: '⚠️ ไม่พบรายการจอง หรือคิวนี้ถูกยกเลิกไปแล้ว' }]
           });
         }
       }
@@ -264,7 +413,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ----------------------------------------------------
-// 4. API จองห้อง (พร้อมระบุว่าชนกับห้องไหน เวลาใด)
+// 5. API จองห้อง (ส่งแจ้งเตือนทั้งผู้จอง และ Admin)
 // ----------------------------------------------------
 app.post('/api/bookings', async (req, res) => {
   const { user_line_id, user_name, room_id, title, start_time, end_time } = req.body;
@@ -331,8 +480,14 @@ app.post('/api/bookings', async (req, res) => {
     const booking = inserted.rows[0];
     await client.query('COMMIT');
 
+    // 1. ส่งแจ้งเตือนให้ผู้จอง
     sendBookingConfirmation(user_line_id, booking).catch(err => 
-      console.error('ส่ง LINE Notification ไม่สำเร็จ:', err.message)
+      console.error('ส่ง LINE Notification ให้ผู้จองไม่สำเร็จ:', err.message)
+    );
+
+    // 2. ส่งแจ้งเตือนให้ Admin ทุกคน
+    notifyAdminsNewBooking(booking, user_line_id).catch(err =>
+      console.error('ส่งแจ้งเตือน Admin ไม่สำเร็จ:', err.message)
     );
 
     res.status(201).json({ message: 'จองสำเร็จ', booking });
@@ -345,6 +500,7 @@ app.post('/api/bookings', async (req, res) => {
   }
 });
 
+// ฟังก์ชันส่งการ์ดยืนยันให้ผู้จอง
 async function sendBookingConfirmation(userId, booking) {
   const sTime = formatThaiTime(booking.start_time);
   const eTime = formatThaiTime(booking.end_time);
@@ -403,6 +559,76 @@ async function sendBookingConfirmation(userId, booking) {
   };
 
   await lineClient.pushMessage({ to: userId, messages: [message] });
+}
+
+// ฟังก์ชันส่งแจ้งเตือนการจองใหม่ไปยัง Admin
+async function notifyAdminsNewBooking(booking, bookerId) {
+  if (!ADMIN_IDS.length) return;
+
+  const sTime = formatThaiTime(booking.start_time);
+  const eTime = formatThaiTime(booking.end_time);
+  const bDate = formatThaiDate(booking.start_time);
+
+  const adminMessage = {
+    type: 'flex',
+    altText: `📢 มีการจองห้องใหม่: ${booking.title}`,
+    contents: {
+      type: 'bubble',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0055FF',
+        contents: [
+          { type: 'text', text: '📢 มีการจองห้องประชุมใหม่', color: '#ffffff', weight: 'bold', size: 'md' }
+        ]
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'md',
+        contents: [
+          { type: 'text', text: booking.title, weight: 'bold', size: 'lg' },
+          {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'sm',
+            contents: [
+              { type: 'text', text: `👤 ผู้จอง: ${booking.user_name}`, size: 'sm', weight: 'bold', color: '#111111' },
+              { type: 'text', text: `📍 ห้อง: ${ROOM_NAMES[booking.room_id]}`, size: 'sm', color: '#444444' },
+              { type: 'text', text: `📅 วันที่: ${bDate}`, size: 'sm', color: '#666666' },
+              { type: 'text', text: `⏰ เวลา: ${sTime} - ${eTime} น.`, size: 'sm', color: '#666666' }
+            ]
+          }
+        ]
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          {
+            type: 'button',
+            style: 'secondary',
+            color: '#FF4B4B',
+            height: 'sm',
+            action: {
+              type: 'postback',
+              label: 'ยกเลิกรายการนี้ (Admin)',
+              data: `action=admin_cancel&booking_id=${booking.id}`
+            }
+          }
+        ]
+      }
+    }
+  };
+
+  // ส่งเตือนไปยัง Admin ทุกคน (ยกเว้นกรณีที่คนจองเป็น Admin เอง ก็ยังส่งแจ้งให้ทราบ)
+  for (const adminId of ADMIN_IDS) {
+    try {
+      await lineClient.pushMessage({ to: adminId, messages: [adminMessage] });
+    } catch (err) {
+      console.error(`ไม่สามารถส่งข้อความหา Admin (${adminId}):`, err.message);
+    }
+  }
 }
 
 const PORT = process.env.PORT || 3000;
