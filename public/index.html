@@ -101,7 +101,6 @@
         if (liff.isInClient()) {
           liff.login();
         } else {
-          // หากเปิดผ่านบราวเซอร์คอมพิวเตอร์ ให้ใช้ชื่อทดสอบ
           userProfile = { userId: "WEB_DEV_USER", displayName: "ผู้ใช้ทดสอบ (เบราว์เซอร์)" };
           userDisplay.innerText = `👤 ผู้จอง: "${userProfile.displayName}"`;
         }
@@ -129,8 +128,9 @@
       return;
     }
 
-    const fullStartTime = `${bookingDate}T${startTimeVal}:00+07:00`;
-    const fullEndTime = `${bookingDate}T${endTimeVal}:00+07:00`;
+    // ตัด +07:00 ออก ส่งเป็นเวลาตรงๆ เพื่อไม่ให้ฐานข้อมูลทดเวลาเพิ่ม
+    const fullStartTime = `${bookingDate}T${startTimeVal}:00`;
+    const fullEndTime = `${bookingDate}T${endTimeVal}:00`;
 
     const btn = document.getElementById('submitBtn');
     btn.disabled = true;
