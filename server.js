@@ -17,8 +17,11 @@ const lineConfig = {
 };
 const lineClient = new line.messagingApi.MessagingApiClient(lineConfig);
 
-// รายชื่อ LINE User ID ของผู้ดูแลระบบ (คั่นด้วยเครื่องหมายจุลภาค ,)
+// รายชื่อ LINE User ID ของแอดมิน (ดึงจาก Render Environment)
 const ADMIN_IDS = (process.env.ADMIN_LINE_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+
+// รหัส PIN เข้าหน้าเว็บ Admin Dashboard (ค่าเริ่มต้น 1234 หากไม่ได้ตั้งใน Render)
+const ADMIN_DASHBOARD_PIN = process.env.ADMIN_PIN || '1234';
 
 const CONFLICT_RULES = {
   'R1': ['R1', 'R_ALL'],
@@ -32,7 +35,7 @@ const ROOM_NAMES = {
   'R_ALL': 'ห้องทุ่งประกายเพชร (รวม 1+2)'
 };
 
-// ฟังก์ชันดึงเวลา HH:mm แสดงผลตรงๆ
+// ฟังก์ชันดึงเวลา HH:mm แสดงผลตรงๆ โดยไม่โดน Timezone เลื่อน
 function formatThaiTime(dateInput) {
   if (!dateInput) return '';
   const str = typeof dateInput === 'string' ? dateInput : dateInput.toISOString();
@@ -336,12 +339,20 @@ app.post('/webhook', express.json(), async (req, res) => {
       const action = params.get('action');
       const bookingId = params.get('booking_id');
 
+      // ยูสเซอร์กดยกเลิกของตัวเอง
       if (action === 'cancel') {
+        let cancellerName = 'เจ้าของคิว';
+        try {
+          const profile = await lineClient.getProfile(userId);
+          cancellerName = profile.displayName;
+        } catch (e) {}
+
         const updateResult = await pool.query(
-          `UPDATE bookings SET status = 'cancelled' 
+          `UPDATE bookings 
+           SET status = 'cancelled', cancelled_by = $3
            WHERE id = $1 AND user_line_id = $2 AND status = 'confirmed' 
            RETURNING *;`,
-          [bookingId, userId]
+          [bookingId, userId, cancellerName]
         );
 
         if (updateResult.rows.length > 0) {
@@ -361,6 +372,7 @@ app.post('/webhook', express.json(), async (req, res) => {
         }
       }
 
+      // ADMIN กดยกเลิกผ่านแชต LINE
       if (action === 'admin_cancel') {
         if (!ADMIN_IDS.includes(userId)) {
           await lineClient.replyMessage({
@@ -370,11 +382,18 @@ app.post('/webhook', express.json(), async (req, res) => {
           continue;
         }
 
+        let adminName = 'Admin (LINE)';
+        try {
+          const profile = await lineClient.getProfile(userId);
+          adminName = `Admin: ${profile.displayName}`;
+        } catch (e) {}
+
         const updateResult = await pool.query(
-          `UPDATE bookings SET status = 'cancelled' 
+          `UPDATE bookings 
+           SET status = 'cancelled', cancelled_by = $2 
            WHERE id = $1 AND status = 'confirmed' 
            RETURNING *;`,
-          [bookingId]
+          [bookingId, adminName]
         );
 
         if (updateResult.rows.length > 0) {
@@ -413,7 +432,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ----------------------------------------------------
-// 5. API จองห้อง (ส่งแจ้งเตือนทั้งผู้จอง และ Admin)
+// 5. API จองห้อง
 // ----------------------------------------------------
 app.post('/api/bookings', async (req, res) => {
   const { user_line_id, user_name, room_id, title, start_time, end_time } = req.body;
@@ -480,12 +499,10 @@ app.post('/api/bookings', async (req, res) => {
     const booking = inserted.rows[0];
     await client.query('COMMIT');
 
-    // 1. ส่งแจ้งเตือนให้ผู้จอง
     sendBookingConfirmation(user_line_id, booking).catch(err => 
       console.error('ส่ง LINE Notification ให้ผู้จองไม่สำเร็จ:', err.message)
     );
 
-    // 2. ส่งแจ้งเตือนให้ Admin ทุกคน
     notifyAdminsNewBooking(booking, user_line_id).catch(err =>
       console.error('ส่งแจ้งเตือน Admin ไม่สำเร็จ:', err.message)
     );
@@ -621,7 +638,6 @@ async function notifyAdminsNewBooking(booking, bookerId) {
     }
   };
 
-  // ส่งเตือนไปยัง Admin ทุกคน (ยกเว้นกรณีที่คนจองเป็น Admin เอง ก็ยังส่งแจ้งให้ทราบ)
   for (const adminId of ADMIN_IDS) {
     try {
       await lineClient.pushMessage({ to: adminId, messages: [adminMessage] });
@@ -631,11 +647,11 @@ async function notifyAdminsNewBooking(booking, bookerId) {
   }
 }
 
-const PORT = process.env.PORT || 3000;
-// รหัส PIN ล็อกอินเข้าหน้าเว็บ Admin Dashboard (ค่าเริ่มต้นคือ 1234 หรือดึงจาก Render Environment)
-const ADMIN_DASHBOARD_PIN = process.env.ADMIN_PIN || '1234';
+// ----------------------------------------------------
+// 6. API สำหรับ Admin Dashboard (Web Admin)
+// ----------------------------------------------------
 
-// 1. API ดึงรายการจองทั้งหมดสำหรับ Admin Dashboard
+// 6.1 ดึงรายการจองทั้งหมด (รวม cancelled_by)
 app.get('/api/admin/bookings', async (req, res) => {
   const { key } = req.query;
   if (key !== ADMIN_DASHBOARD_PIN) {
@@ -644,10 +660,10 @@ app.get('/api/admin/bookings', async (req, res) => {
 
   try {
     const result = await pool.query(`
-      SELECT id, room_id, title, user_name, user_line_id, start_time, end_time, status, created_at
+      SELECT id, room_id, title, user_name, user_line_id, start_time, end_time, status, cancelled_by, created_at
       FROM bookings
       ORDER BY start_time DESC
-      LIMIT 100;
+      LIMIT 150;
     `);
     res.json({ bookings: result.rows });
   } catch (err) {
@@ -656,7 +672,7 @@ app.get('/api/admin/bookings', async (req, res) => {
   }
 });
 
-// 2. API สั่งยกเลิกการจองผ่าน Admin Dashboard
+// 6.2 ยกเลิกการจองผ่านหน้าเว็บ Dashboard
 app.post('/api/admin/bookings/:id/cancel', async (req, res) => {
   const { key } = req.body;
   const bookingId = req.params.id;
@@ -667,7 +683,10 @@ app.post('/api/admin/bookings/:id/cancel', async (req, res) => {
 
   try {
     const updateResult = await pool.query(
-      `UPDATE bookings SET status = 'cancelled' WHERE id = $1 AND status = 'confirmed' RETURNING *;`,
+      `UPDATE bookings 
+       SET status = 'cancelled', cancelled_by = 'Admin (Dashboard)' 
+       WHERE id = $1 AND status = 'confirmed' 
+       RETURNING *;`,
       [bookingId]
     );
 
@@ -677,13 +696,12 @@ app.post('/api/admin/bookings/:id/cancel', async (req, res) => {
 
     const item = updateResult.rows[0];
 
-    // ส่ง LINE แจ้งเตือนผู้จองว่าแอดมินยกเลิกคิว
     if (item.user_line_id) {
       lineClient.pushMessage({
         to: item.user_line_id,
         messages: [{
           type: 'text',
-          text: `⚠️ แจ้งเตือน: รายการจอง "${item.title}" (${ROOM_NAMES[item.room_id]}) ของคุณถูกยกเลิกโดยผู้ดูแลระบบผ่านหน้าเว็บ Dashboard ครับ`
+          text: `⚠️ แจ้งเตือน: รายการจอง "${item.title}" (${ROOM_NAMES[item.room_id]}) ของคุณถูกยกเลิกโดยผู้ดูแลระบบผ่าน Dashboard ครับ`
         }]
       }).catch(console.error);
     }
@@ -694,6 +712,8 @@ app.post('/api/admin/bookings/:id/cancel', async (req, res) => {
     res.status(500).json({ error: 'เกิดข้อผิดพลาดในการยกเลิก' });
   }
 });
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
 });
