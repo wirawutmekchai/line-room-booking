@@ -632,6 +632,68 @@ async function notifyAdminsNewBooking(booking, bookerId) {
 }
 
 const PORT = process.env.PORT || 3000;
+// รหัส PIN ล็อกอินเข้าหน้าเว็บ Admin Dashboard (ค่าเริ่มต้นคือ 1234 หรือดึงจาก Render Environment)
+const ADMIN_DASHBOARD_PIN = process.env.ADMIN_PIN || '1234';
+
+// 1. API ดึงรายการจองทั้งหมดสำหรับ Admin Dashboard
+app.get('/api/admin/bookings', async (req, res) => {
+  const { key } = req.query;
+  if (key !== ADMIN_DASHBOARD_PIN) {
+    return res.status(401).json({ error: 'รหัสผ่าน Admin PIN ไม่ถูกต้อง' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT id, room_id, title, user_name, user_line_id, start_time, end_time, status, created_at
+      FROM bookings
+      ORDER BY start_time DESC
+      LIMIT 100;
+    `);
+    res.json({ bookings: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงข้อมูล' });
+  }
+});
+
+// 2. API สั่งยกเลิกการจองผ่าน Admin Dashboard
+app.post('/api/admin/bookings/:id/cancel', async (req, res) => {
+  const { key } = req.body;
+  const bookingId = req.params.id;
+
+  if (key !== ADMIN_DASHBOARD_PIN) {
+    return res.status(401).json({ error: 'รหัสผ่าน Admin PIN ไม่ถูกต้อง' });
+  }
+
+  try {
+    const updateResult = await pool.query(
+      `UPDATE bookings SET status = 'cancelled' WHERE id = $1 AND status = 'confirmed' RETURNING *;`,
+      [bookingId]
+    );
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: 'ไม่พบรายการจอง หรือรายการนี้ถูกยกเลิกไปแล้ว' });
+    }
+
+    const item = updateResult.rows[0];
+
+    // ส่ง LINE แจ้งเตือนผู้จองว่าแอดมินยกเลิกคิว
+    if (item.user_line_id) {
+      lineClient.pushMessage({
+        to: item.user_line_id,
+        messages: [{
+          type: 'text',
+          text: `⚠️ แจ้งเตือน: รายการจอง "${item.title}" (${ROOM_NAMES[item.room_id]}) ของคุณถูกยกเลิกโดยผู้ดูแลระบบผ่านหน้าเว็บ Dashboard ครับ`
+        }]
+      }).catch(console.error);
+    }
+
+    res.json({ message: 'ยกเลิกสำเร็จ', booking: item });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการยกเลิก' });
+  }
+});
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
 });
