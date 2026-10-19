@@ -4,158 +4,175 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>จองห้องประชุม</title>
-  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #f4f6f8; margin: 0; padding: 16px; display: flex; justify-content: center; }
+    .card { background: #ffffff; border-radius: 12px; padding: 20px; width: 100%; max-width: 480px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    h2 { margin-top: 0; color: #111; font-size: 20px; }
+    .user-info { font-size: 13px; color: #555; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; color: #333; }
+    input, select { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; background: #fff; }
+    input:focus, select:focus { outline: none; border-color: #00B900; }
+    .row { display: flex; gap: 10px; }
+    .row > div { flex: 1; }
+    button { width: 100%; padding: 12px; background-color: #00B900; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; margin-top: 8px; }
+    button:disabled { background-color: #9cd4a7; cursor: not-allowed; }
+  </style>
 </head>
-<body class="bg-gray-100 min-h-screen p-4 flex items-center justify-center">
-  <div class="w-full max-w-md bg-white rounded-xl shadow-md p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-2">จองห้องประชุม</h1>
-    <div id="user-info" class="text-sm text-gray-500 mb-6">กำลังเชื่อมต่อ LINE...</div>
+<body>
 
-    <form id="booking-form" class="space-y-4">
-      <div>
-        <label for="title" class="block text-sm font-medium text-gray-700">หัวข้อการประชุม</label>
-        <input type="text" id="title" required placeholder="เช่น ประชุมวางแผนทีม" class="mt-1 w-full p-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400">
-      </div>
+<div class="card">
+  <h2>จองห้องประชุม</h2>
+  <div id="user-display" class="user-info">กำลังเชื่อมต่อ LINE...</div>
 
+  <form id="bookingForm">
+    <div class="form-group">
+      <label for="title">หัวข้อการประชุม</label>
+      <input type="text" id="title" placeholder="เช่น ประชุมวางแผนทีม" required>
+    </div>
+
+    <div class="form-group">
+      <label for="room_id">เลือกห้องประชุม</label>
+      <select id="room_id" required>
+        <option value="R1">ห้องทุ่งรวงเงิน (ห้องเล็ก)</option>
+        <option value="R2">ห้องทุ่งรวงทอง (ห้องใหญ่)</option>
+        <option value="R_ALL">ห้องทุ่งประกายเพชร (รวม 1+2)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="booking_date">วันที่</label>
+      <input type="date" id="booking_date" required>
+    </div>
+
+    <div class="row form-group">
       <div>
-        <label for="room_id" class="block text-sm font-medium text-gray-700">เลือกห้องประชุม</label>
-        <select id="room_id" class="mt-1 w-full p-2.5 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-400" required>
-          <option value="R1">ห้องทุ่งรวงเงิน (ห้องเล็ก)</option>
-          <option value="R2">ห้องทุ่งรวงทอง (ห้องใหญ่)</option>
-          <option value="R_ALL">ห้องทุ่งประกายเพชร (รวมห้อง 1 + 2)</option>
+        <label for="start_time_select">เวลาเริ่ม (24 ชม.)</label>
+        <select id="start_time_select" required>
+          <option value="">-- เลือก --</option>
         </select>
       </div>
-
       <div>
-        <label for="booking_date" class="block text-sm font-medium text-gray-700">วันที่</label>
-        <input type="date" id="booking_date" required class="mt-1 w-full p-2.5 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-400">
+        <label for="end_time_select">เวลาสิ้นสุด (24 ชม.)</label>
+        <select id="end_time_select" required>
+          <option value="">-- เลือก --</option>
+        </select>
       </div>
+    </div>
 
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label for="start_time_select" class="block text-sm font-medium text-gray-700">เวลาเริ่ม (24 ชม.)</label>
-          <select id="start_time_select" required class="mt-1 w-full p-2.5 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-400">
-            <option value="">-- เลือก --</option>
-          </select>
-        </div>
-        <div>
-          <label for="end_time_select" class="block text-sm font-medium text-gray-700">เวลาสิ้นสุด (24 ชม.)</label>
-          <select id="end_time_select" required class="mt-1 w-full p-2.5 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-400">
-            <option value="">-- เลือก --</option>
-          </select>
-        </div>
-      </div>
+    <button type="submit" id="submitBtn">ยืนยันการจอง</button>
+  </form>
+</div>
 
-      <button type="submit" id="btn-submit" class="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-semibold py-3 rounded-lg shadow transition mt-2">
-        ยืนยันการจอง
-      </button>
-    </form>
-  </div>
+<script>
+  const MY_LIFF_ID = "2012070438-neRmVlKc";
+  let userProfile = null;
 
-  <script>
-    const MY_LIFF_ID = "2012070438-neRmVlKc";
-    let currentUser = null;
-
-    function populateTimeOptions() {
-      const startSelect = document.getElementById('start_time_select');
-      const endSelect = document.getElementById('end_time_select');
-      for (let h = 8; h <= 20; h++) {
-        const hh = String(h).padStart(2, '0');
-        startSelect.add(new Option(`${hh}:00 น.`, `${hh}:00`));
-        endSelect.add(new Option(`${hh}:00 น.`, `${hh}:00`));
-        if (h < 20) {
-          startSelect.add(new Option(`${hh}:30 น.`, `${hh}:30`));
-          endSelect.add(new Option(`${hh}:30 น.`, `${hh}:30`));
-        }
+  function populateTimeOptions() {
+    const startSelect = document.getElementById('start_time_select');
+    const endSelect = document.getElementById('end_time_select');
+    for (let h = 8; h <= 20; h++) {
+      const hh = String(h).padStart(2, '0');
+      startSelect.add(new Option(`${hh}:00 น.`, `${hh}:00`));
+      endSelect.add(new Option(`${hh}:00 น.`, `${hh}:00`));
+      if (h < 20) {
+        startSelect.add(new Option(`${hh}:30 น.`, `${hh}:30`));
+        endSelect.add(new Option(`${hh}:30 น.`, `${hh}:30`));
       }
     }
+  }
 
-    function setDefaultDate() {
-      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
-      document.getElementById('booking_date').value = today;
-    }
+  function setDefaultDate() {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+    document.getElementById('booking_date').value = today;
+  }
 
-    async function init() {
-      populateTimeOptions();
-      setDefaultDate();
-
-      const userInfo = document.getElementById('user-info');
-      try {
-        await liff.init({ liffId: MY_LIFF_ID });
-        
-        if (liff.isLoggedIn()) {
-          currentUser = await liff.getProfile();
-          userInfo.innerText = `👤 ผู้จอง: "${currentUser.displayName}"`;
-          userInfo.className = "text-sm text-green-600 font-semibold mb-6";
-        } else {
-          // หากเปิดภายนอก LINE แล้วยังไม่ล็อกอิน
+  async function initLiff() {
+    const userDisplay = document.getElementById('user-display');
+    try {
+      await liff.init({ liffId: MY_LIFF_ID });
+      if (liff.isLoggedIn()) {
+        userProfile = await liff.getProfile();
+        userDisplay.innerText = `👤 ผู้จอง: "${userProfile.displayName}"`;
+        userDisplay.style.color = '#00B900';
+      } else {
+        if (liff.isInClient()) {
           liff.login();
+        } else {
+          // หากเปิดผ่านบราวเซอร์คอมพิวเตอร์ ให้ใช้ชื่อทดสอบ
+          userProfile = { userId: "WEB_DEV_USER", displayName: "ผู้ใช้ทดสอบ (เบราว์เซอร์)" };
+          userDisplay.innerText = `👤 ผู้จอง: "${userProfile.displayName}"`;
         }
-      } catch (err) {
-        userInfo.innerText = `⚠️ ไม่สามารถดึงโปรไฟล์ LINE: ${err.message}`;
-        userInfo.className = "text-sm text-red-500 mb-6";
       }
+    } catch (err) {
+      userDisplay.innerText = `⚠️ ข้อผิดพลาด LINE: ${err.message}`;
+      userDisplay.style.color = '#FF4B4B';
+    }
+  }
+
+  document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const bookingDate = document.getElementById('booking_date').value;
+    const startTimeVal = document.getElementById('start_time_select').value;
+    const endTimeVal = document.getElementById('end_time_select').value;
+
+    if (!startTimeVal || !endTimeVal) {
+      alert('กรุณาเลือกเวลาเริ่มและเวลาสิ้นสุด');
+      return;
     }
 
-    document.getElementById('booking-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      const date = document.getElementById('booking_date').value;
-      const startTime = document.getElementById('start_time_select').value;
-      const endTime = document.getElementById('end_time_select').value;
+    if (startTimeVal >= endTimeVal) {
+      alert('เวลาสิ้นสุดต้องมากกว่าเวลาเริ่มต้น');
+      return;
+    }
 
-      if (!startTime || !endTime) {
-        alert('กรุณาเลือกเวลาเริ่มและเวลาสิ้นสุด');
-        return;
-      }
+    const fullStartTime = `${bookingDate}T${startTimeVal}:00+07:00`;
+    const fullEndTime = `${bookingDate}T${endTimeVal}:00+07:00`;
 
-      if (startTime >= endTime) {
-        alert('เวลาสิ้นสุดต้องมากกว่าเวลาเริ่มต้น');
-        return;
-      }
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.innerText = 'กำลังตรวจสอบห้อง...';
 
-      const fullStartTime = `${date}T${startTime}:00+07:00`;
-      const fullEndTime = `${date}T${endTime}:00+07:00`;
+    const payload = {
+      user_line_id: userProfile ? userProfile.userId : 'U_GUEST',
+      user_name: userProfile ? userProfile.displayName : 'ผู้ใช้ LINE',
+      room_id: document.getElementById('room_id').value,
+      title: document.getElementById('title').value,
+      start_time: fullStartTime,
+      end_time: fullEndTime
+    };
 
-      const btn = document.getElementById('btn-submit');
-      btn.disabled = true;
-      btn.innerText = 'กำลังตรวจสอบห้อง...';
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-      const payload = {
-        user_line_id: currentUser ? currentUser.userId : 'U_MANUAL_TEST',
-        user_name: currentUser ? currentUser.displayName : 'ผู้ใช้ LINE',
-        room_id: document.getElementById('room_id').value,
-        title: document.getElementById('title').value,
-        start_time: fullStartTime,
-        end_time: fullEndTime
-      };
-
-      try {
-        const res = await fetch('/api/bookings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-          alert(data.error || 'เกิดข้อผิดพลาดในการจอง');
-        } else {
-          alert('✅ จองห้องสำเร็จ! ข้อความยืนยันถูกส่งไปยังแชต LINE ของคุณแล้ว');
-          if (typeof liff !== 'undefined' && liff.closeWindow) {
-            liff.closeWindow();
-          }
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'เกิดข้อผิดพลาดในการจอง');
+      } else {
+        alert('✅ จองห้องประชุมสำเร็จเรียบร้อยแล้ว');
+        if (typeof liff !== 'undefined' && liff.closeWindow) {
+          liff.closeWindow();
         }
-      } catch (err) {
-        alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
-      } finally {
-        btn.disabled = false;
-        btn.innerText = 'ยืนยันการจอง';
       }
-    });
+    } catch (err) {
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+    } finally {
+      btn.disabled = false;
+      btn.innerText = 'ยืนยันการจอง';
+    }
+  });
 
-    init();
-  </script>
+  populateTimeOptions();
+  setDefaultDate();
+  initLiff();
+</script>
+
 </body>
 </html>
