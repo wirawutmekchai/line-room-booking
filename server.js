@@ -1,395 +1,179 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { Pool } = require('pg');
-const line = require('@line/bot-sdk');
-const path = require('path');
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>จองห้องประชุม</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #f4f6f8; margin: 0; padding: 16px; display: flex; justify-content: center; }
+    .card { background: #ffffff; border-radius: 12px; padding: 20px; width: 100%; max-width: 480px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    h2 { margin-top: 0; color: #111; font-size: 20px; }
+    .user-info { font-size: 13px; color: #555; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; color: #333; }
+    input, select { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; background: #fff; }
+    input:focus, select:focus { outline: none; border-color: #00B900; }
+    .row { display: flex; gap: 10px; }
+    .row > div { flex: 1; }
+    button { width: 100%; padding: 12px; background-color: #00B900; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; margin-top: 8px; }
+    button:disabled { background-color: #9cd4a7; cursor: not-allowed; }
+  </style>
+</head>
+<body>
 
-const app = express();
+<div class="card">
+  <h2>จองห้องประชุม</h2>
+  <div id="user-display" class="user-info">กำลังเชื่อมต่อ LINE...</div>
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+  <form id="bookingForm">
+    <div class="form-group">
+      <label for="title">หัวข้อการประชุม</label>
+      <input type="text" id="title" placeholder="เช่น ประชุมวางแผนทีม" required>
+    </div>
 
-const lineConfig = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
-};
-const lineClient = new line.messagingApi.MessagingApiClient(lineConfig);
+    <div class="form-group">
+      <label for="room_id">เลือกห้องประชุม</label>
+      <select id="room_id" required>
+        <option value="R1">ห้องทุ่งรวงเงิน (ห้องเล็ก)</option>
+        <option value="R2">ห้องทุ่งรวงทอง (ห้องใหญ่)</option>
+        <option value="R_ALL">ห้องทุ่งประกายเพชร (รวม 1+2)</option>
+      </select>
+    </div>
 
-const CONFLICT_RULES = {
-  'R1': ['R1', 'R_ALL'],
-  'R2': ['R2', 'R_ALL'],
-  'R_ALL': ['R1', 'R2', 'R_ALL']
-};
+    <div class="form-group">
+      <label for="booking_date">วันที่</label>
+      <input type="date" id="booking_date" required>
+    </div>
 
-const ROOM_NAMES = {
-  'R1': 'ห้องทุ่งรวงเงิน (ห้องเล็ก)',
-  'R2': 'ห้องทุ่งรวงทอง (ห้องใหญ่)',
-  'R_ALL': 'ห้องทุ่งประกายเพชร (รวม 1+2)'
-};
+    <div class="row form-group">
+      <div>
+        <label for="start_time_select">เวลาเริ่ม (24 ชม.)</label>
+        <select id="start_time_select" required>
+          <option value="">-- เลือก --</option>
+        </select>
+      </div>
+      <div>
+        <label for="end_time_select">เวลาสิ้นสุด (24 ชม.)</label>
+        <select id="end_time_select" required>
+          <option value="">-- เลือก --</option>
+        </select>
+      </div>
+    </div>
 
-// ----------------------------------------------------
-// 1. ฟังก์ชัน Flex Message: ดูตารางห้องวันนี้
-// ----------------------------------------------------
-async function getTodayScheduleFlex() {
-  const query = `
-    SELECT room_id, title, user_name, start_time, end_time
-    FROM bookings
-    WHERE status = 'confirmed'
-      AND (start_time AT TIME ZONE 'Asia/Bangkok')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')::date
-    ORDER BY start_time ASC;
-  `;
-  const result = await pool.query(query);
-  const bookings = result.rows;
+    <button type="submit" id="submitBtn">ยืนยันการจอง</button>
+  </form>
+</div>
 
-  const dateFormatted = new Date().toLocaleDateString('th-TH', { 
-    dateStyle: 'medium', 
-    timeZone: 'Asia/Bangkok' 
-  });
+<script>
+  const MY_LIFF_ID = "2012070438-neRmVlKc";
+  let userProfile = null;
 
-  if (bookings.length === 0) {
-    return {
-      type: 'bubble',
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          { type: 'text', text: '📅 ตารางห้องประชุมวันนี้', weight: 'bold', size: 'lg', color: '#1DB446' },
-          { type: 'text', text: dateFormatted, size: 'xs', color: '#888888', margin: 'xs' },
-          { type: 'separator', margin: 'md' },
-          { type: 'text', text: '✨ วันนี้ยังไม่มีรายการจอง ว่างตลอดทั้งวันครับ', margin: 'lg', color: '#555555', wrap: true }
-        ]
+  // 1. สร้างตัวเลือกเวลา 08:00 - 20:00 น. (นาที 00 และ 30)
+  function populateTimeOptions() {
+    const startSelect = document.getElementById('start_time_select');
+    const endSelect = document.getElementById('end_time_select');
+    const times = [];
+
+    for (let h = 8; h <= 20; h++) {
+      const hh = String(h).padStart(2, '0');
+      times.push(`${hh}:00`);
+      if (h < 20) {
+        times.push(`${hh}:30`);
       }
-    };
-  }
+    }
 
-  const contents = [
-    { type: 'text', text: '📅 ตารางการจองวันนี้', weight: 'bold', size: 'lg', color: '#1DB446' },
-    { type: 'text', text: dateFormatted, size: 'xs', color: '#888888', margin: 'xs' },
-    { type: 'separator', margin: 'md' }
-  ];
-
-  bookings.forEach((b) => {
-    const sTime = new Date(b.start_time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
-    const eTime = new Date(b.end_time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
-
-    contents.push({
-      type: 'box',
-      layout: 'vertical',
-      margin: 'md',
-      paddingAll: '8px',
-      backgroundColor: '#F7F8F9',
-      cornerRadius: '8px',
-      contents: [
-        { type: 'text', text: `${sTime} - ${eTime} น.`, weight: 'bold', size: 'sm', color: '#00B900' },
-        { type: 'text', text: `📍 ${ROOM_NAMES[b.room_id] || b.room_id}`, size: 'xs', weight: 'bold', color: '#333333', margin: 'xs' },
-        { type: 'text', text: `หัวข้อ: ${b.title}`, size: 'xs', color: '#555555' },
-        { type: 'text', text: `ผู้จอง: ${b.user_name}`, size: 'xs', color: '#888888' }
-      ]
+    times.forEach(t => {
+      startSelect.add(new Option(`${t} น.`, t));
+      endSelect.add(new Option(`${t} น.`, t));
     });
-  });
-
-  return {
-    type: 'bubble',
-    body: {
-      type: 'box',
-      layout: 'vertical',
-      contents: contents
-    }
-  };
-}
-
-// ----------------------------------------------------
-// 2. ฟังก์ชัน Flex Message: ดูรายการจองของตนเองเพื่อยกเลิก
-// ----------------------------------------------------
-async function getMyBookingsFlex(userId) {
-  const query = `
-    SELECT id, room_id, title, start_time, end_time
-    FROM bookings
-    WHERE status = 'confirmed'
-      AND user_line_id = $1
-      AND end_time >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
-    ORDER BY start_time ASC
-    LIMIT 5;
-  `;
-  const result = await pool.query(query, [userId]);
-  const bookings = result.rows;
-
-  if (bookings.length === 0) {
-    return {
-      type: 'bubble',
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          { type: 'text', text: '📋 รายการจองของคุณ', weight: 'bold', size: 'lg', color: '#00B900' },
-          { type: 'separator', margin: 'md' },
-          { type: 'text', text: 'คุณไม่มีรายการจองห้องประชุมที่กำลังจะมาถึงครับ', margin: 'lg', color: '#666666', wrap: true }
-        ]
-      }
-    };
   }
 
-  const bubbles = bookings.map((b) => {
-    const sTime = new Date(b.start_time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
-    const eTime = new Date(b.end_time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
-    const bDate = new Date(b.start_time).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' });
+  // กำหนดวันปัจจุบันให้เป็นค่าเริ่มต้น
+  function setDefaultDate() {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+    document.getElementById('booking_date').value = today;
+  }
 
-    return {
-      type: 'bubble',
-      size: 'kilo',
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          { type: 'text', text: '📌 การจองของคุณ', weight: 'bold', size: 'sm', color: '#1DB446' },
-          { type: 'text', text: b.title, weight: 'bold', size: 'md', margin: 'sm' },
-          { type: 'separator', margin: 'sm' },
-          { type: 'text', text: `📍 ห้อง: ${ROOM_NAMES[b.room_id]}`, size: 'xs', color: '#444444', margin: 'sm' },
-          { type: 'text', text: `📅 วันที่: ${bDate}`, size: 'xs', color: '#666666' },
-          { type: 'text', text: `⏰ เวลา: ${sTime} - ${eTime} น.`, size: 'xs', color: '#666666' }
-        ]
-      },
-      footer: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          {
-            type: 'button',
-            style: 'secondary',
-            color: '#FF4B4B',
-            height: 'sm',
-            action: {
-              type: 'postback',
-              label: 'ยกเลิกการจองนี้',
-              data: `action=cancel&booking_id=${b.id}`
-            }
-          }
-        ]
+  // 2. เริ่มต้น LIFF
+  async function initLiff() {
+    try {
+      await liff.init({ liffId: MY_LIFF_ID });
+      if (liff.isLoggedIn()) {
+        userProfile = await liff.getProfile();
+        document.getElementById('user-display').innerText = `👤 ผู้จอง: "${userProfile.displayName}"`;
+      } else {
+        liff.login();
       }
-    };
-  });
+    } catch (err) {
+      document.getElementById('user-display').innerText = `เข้าสู่ระบบ LINE ไม่สำเร็จ: ${err.message}`;
+    }
+  }
 
-  return {
-    type: 'carousel',
-    contents: bubbles
-  };
-}
+  // 3. จัดการการ Submit จองห้อง
+  document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
 
-// ----------------------------------------------------
-// 3. Webhook จัดการ Event ของ LINE
-// ----------------------------------------------------
-app.post('/webhook', express.json(), async (req, res) => {
-  res.status(200).send('OK');
+    const bookingDate = document.getElementById('booking_date').value;
+    const startTimeVal = document.getElementById('start_time_select').value;
+    const endTimeVal = document.getElementById('end_time_select').value;
 
-  const events = req.body.events || [];
-  for (const event of events) {
-    // ผู้ใช้ส่งข้อความ
-    if (event.type === 'message' && event.message.type === 'text') {
-      const text = event.message.text.trim();
-
-      if (['เช็กห้อง', 'เช็คห้อง', 'ตารางห้อง', 'ดูห้อง', 'มีห้องว่างไหม'].some(kw => text.includes(kw))) {
-        const flex = await getTodayScheduleFlex();
-        await lineClient.replyMessage({
-          replyToken: event.replyToken,
-          messages: [{ type: 'flex', altText: 'ตารางการจองห้องประชุมวันนี้', contents: flex }]
-        });
-      } else if (['ยกเลิก', 'ยกเลิกห้อง', 'ยกเลิกการจอง'].some(kw => text.includes(kw))) {
-        const flex = await getMyBookingsFlex(event.source.userId);
-        await lineClient.replyMessage({
-          replyToken: event.replyToken,
-          messages: [{ type: 'flex', altText: 'รายการจองของคุณ', contents: flex }]
-        });
-      }
+    if (!startTimeVal || !endTimeVal) {
+      alert('กรุณาเลือกเวลาเริ่มและเวลาสิ้นสุด');
+      return;
     }
 
-    // ผู้ใช้กดยกเลิกจากปุ่ม Postback Action
-    if (event.type === 'postback') {
-      const params = new URLSearchParams(event.postback.data);
-      if (params.get('action') === 'cancel') {
-        const bookingId = params.get('booking_id');
-        const userId = event.source.userId;
+    if (startTimeVal >= endTimeVal) {
+      alert('เวลาสิ้นสุดต้องมากกว่าเวลาเริ่มต้น');
+      return;
+    }
 
-        const updateResult = await pool.query(
-          `UPDATE bookings SET status = 'cancelled' 
-           WHERE id = $1 AND user_line_id = $2 AND status = 'confirmed' 
-           RETURNING *;`,
-          [bookingId, userId]
-        );
+    // ล็อก Timezone ประเทศไทย (+07:00) ให้กับ ISO String เสมอ
+    const fullStartTime = `${bookingDate}T${startTimeVal}:00+07:00`;
+    const fullEndTime = `${bookingDate}T${endTimeVal}:00+07:00`;
 
-        if (updateResult.rows.length > 0) {
-          const item = updateResult.rows[0];
-          await lineClient.replyMessage({
-            replyToken: event.replyToken,
-            messages: [{
-              type: 'text',
-              text: `❌ ยกเลิกการจองสำเร็จ:\nห้อง: ${ROOM_NAMES[item.room_id]}\nหัวข้อ: ${item.title}`
-            }]
-          });
-        } else {
-          await lineClient.replyMessage({
-            replyToken: event.replyToken,
-            messages: [{
-              type: 'text',
-              text: '⚠️ ไม่พบรายการจอง หรือรายการนี้ถูกยกเลิกไปแล้วครับ'
-            }]
-          });
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.innerText = 'กำลังตรวจสอบห้อง...';
+
+    const payload = {
+      user_line_id: userProfile ? userProfile.userId : 'TEST_USER',
+      user_name: userProfile ? userProfile.displayName : 'ผู้ใช้ LINE',
+      room_id: document.getElementById('room_id').value,
+      title: document.getElementById('title').value,
+      start_time: fullStartTime,
+      end_time: fullEndTime
+    };
+
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'เกิดข้อผิดพลาดในการจอง');
+      } else {
+        alert('✅ จองห้องประชุมสำเร็จเรียบร้อยแล้ว');
+        if (typeof liff !== 'undefined' && liff.closeWindow) {
+          liff.closeWindow();
         }
       }
+    } catch (err) {
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+    } finally {
+      btn.disabled = false;
+      btn.innerText = 'ยืนยันการจอง';
     }
-  }
-});
+  });
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+  populateTimeOptions();
+  setDefaultDate();
+  initLiff();
+</script>
 
-// ----------------------------------------------------
-// 4. API จองห้อง (พร้อมระบุว่าชนกับห้องไหน เวลาใด)
-// ----------------------------------------------------
-app.post('/api/bookings', async (req, res) => {
-  const { user_line_id, user_name, room_id, title, start_time, end_time } = req.body;
-
-  if (!user_line_id || !room_id || !start_time || !end_time) {
-    return res.status(400).json({ error: 'กรอกข้อมูลไม่ครบถ้วน' });
-  }
-
-  const conflictingRooms = CONFLICT_RULES[room_id];
-  if (!conflictingRooms) {
-    return res.status(400).json({ error: 'ระบุห้องไม่ถูกต้อง' });
-  }
-
-  if (new Date(start_time) >= new Date(end_time)) {
-    return res.status(400).json({ error: 'เวลาสิ้นสุดต้องมากกว่าเวลาเริ่มต้น' });
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('LOCK TABLE bookings IN SHARE ROW EXCLUSIVE MODE');
-
-    // ดึงข้อมูลรายการที่มีเวลาชนกันออกมาแสดง
-    const conflictQuery = `
-      SELECT id, room_id, title, user_name, start_time, end_time 
-      FROM bookings
-      WHERE status = 'confirmed'
-        AND room_id = ANY($1::text[])
-        AND (start_time < $3 AND end_time > $2)
-      ORDER BY start_time ASC
-      LIMIT 1;
-    `;
-    const checkResult = await client.query(conflictQuery, [
-      conflictingRooms,
-      start_time,
-      end_time
-    ]);
-
-    if (checkResult.rows.length > 0) {
-      await client.query('ROLLBACK');
-      const conflict = checkResult.rows[0];
-      const sT = new Date(conflict.start_time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
-      const eT = new Date(conflict.end_time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
-      const rName = ROOM_NAMES[conflict.room_id] || conflict.room_id;
-
-      return res.status(409).json({ 
-        error: `ห้องไม่ว่างในช่วงเวลาดังกล่าว!\n📌 ชนกับ: ${rName}\n⏰ เวลา: ${sT} - ${eT} น.\n📝 หัวข้อ: ${conflict.title} (${conflict.user_name})` 
-      });
-    }
-
-    const insertQuery = `
-      INSERT INTO bookings (user_line_id, user_name, room_id, title, start_time, end_time, status)
-      VALUES ($1, $2, $3, $4, $5, $6, 'confirmed')
-      RETURNING *;
-    `;
-    const inserted = await client.query(insertQuery, [
-      user_line_id,
-      user_name || 'ผู้ใช้ LINE',
-      room_id,
-      title || 'การประชุมทั่วไป',
-      start_time,
-      end_time
-    ]);
-
-    const booking = inserted.rows[0];
-    await client.query('COMMIT');
-
-    sendBookingConfirmation(user_line_id, booking).catch(err => 
-      console.error('ส่ง LINE Notification ไม่สำเร็จ:', err.message)
-    );
-
-    res.status(201).json({ message: 'จองสำเร็จ', booking });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
-  } finally {
-    client.release();
-  }
-});
-
-async function sendBookingConfirmation(userId, booking) {
-  const sTime = new Date(booking.start_time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
-  const eTime = new Date(booking.end_time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
-  const bDate = new Date(booking.start_time).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' });
-
-  const message = {
-    type: 'flex',
-    altText: `ยืนยันการจอง: ${ROOM_NAMES[booking.room_id]}`,
-    contents: {
-      type: 'bubble',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#06C755',
-        contents: [
-          { type: 'text', text: '✅ สำเร็จ: จองห้องประชุมแล้ว', color: '#ffffff', weight: 'bold', size: 'md' }
-        ]
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'md',
-        contents: [
-          { type: 'text', text: booking.title, weight: 'bold', size: 'xl' },
-          {
-            type: 'box',
-            layout: 'vertical',
-            spacing: 'sm',
-            contents: [
-              { type: 'text', text: `📍 ห้อง: ${ROOM_NAMES[booking.room_id]}`, size: 'sm', color: '#333333' },
-              { type: 'text', text: `📅 วันที่: ${bDate}`, size: 'sm', color: '#555555' },
-              { type: 'text', text: `⏰ เวลา: ${sTime} - ${eTime} น.`, size: 'sm', color: '#555555' },
-              { type: 'text', text: `👤 ผู้จอง: ${booking.user_name}`, size: 'sm', color: '#777777' }
-            ]
-          }
-        ]
-      },
-      footer: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          {
-            type: 'button',
-            style: 'secondary',
-            color: '#FF4B4B',
-            height: 'sm',
-            action: {
-              type: 'postback',
-              label: 'ยกเลิกการจองนี้',
-              data: `action=cancel&booking_id=${booking.id}`
-            }
-          }
-        ]
-      }
-    }
-  };
-
-  await lineClient.pushMessage({ to: userId, messages: [message] });
-}
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
-});
+</body>
+</html>
