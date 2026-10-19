@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ระบบจัดการห้องประชุม - Admin Dashboard</title>
+  <title>Admin Dashboard - จัดการห้องประชุม</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 min-h-screen p-4 sm:p-8">
-  <div class="max-w-6xl mx-auto">
+  <div class="max-w-7xl mx-auto">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-gray-200 gap-4">
       <div>
@@ -15,7 +15,7 @@
         <p class="text-sm text-gray-500">จัดการข้อมูลการจองห้องประชุมทั้งหมด</p>
       </div>
       <div class="flex items-center gap-2">
-        <input type="password" id="admin_key" placeholder="ใส่รหัส Admin PIN" class="p-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="password" id="admin_key" placeholder="รหัส Admin PIN" class="p-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
         <button onclick="loadBookings()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
           เข้าสู่ระบบ / รีเฟรช
         </button>
@@ -42,7 +42,7 @@
         </select>
       </div>
       <div>
-        <label class="block text-xs font-semibold text-gray-600 mb-1">ค้นหา (ชื่อผู้จอง / หัวข้อ)</label>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">ค้นหา (ชื่อผู้จอง / ผู้ยกเลิก / หัวข้อ)</label>
         <input type="text" id="filter_search" oninput="renderTable()" placeholder="พิมพ์คำค้นหา..." class="w-full p-2 border rounded-lg text-sm">
       </div>
     </div>
@@ -58,12 +58,13 @@
             <th class="py-3 px-4">หัวข้อ</th>
             <th class="py-3 px-4">ผู้จอง</th>
             <th class="py-3 px-4">สถานะ</th>
+            <th class="py-3 px-4">ผู้ยกเลิก</th>
             <th class="py-3 px-4 text-center">จัดการ</th>
           </tr>
         </thead>
         <tbody id="booking_rows" class="divide-y divide-gray-100 text-gray-600">
           <tr>
-            <td colspan="7" class="text-center py-8 text-gray-400">กรุณาใส่รหัส Admin PIN แล้วกด เข้าสู่ระบบ เพื่อโหลดข้อมูล</td>
+            <td colspan="8" class="text-center py-8 text-gray-400">กรุณาใส่รหัส Admin PIN แล้วกด เข้าสู่ระบบ เพื่อโหลดข้อมูล</td>
           </tr>
         </tbody>
       </table>
@@ -116,12 +117,19 @@
       const filtered = rawBookings.filter(b => {
         if (room && b.room_id !== room) return false;
         if (status && b.status !== status) return false;
-        if (search && !b.title.toLowerCase().includes(search) && !b.user_name.toLowerCase().includes(search)) return false;
+        if (search) {
+          const title = (b.title || '').toLowerCase();
+          const user = (b.user_name || '').toLowerCase();
+          const canceller = (b.cancelled_by || '').toLowerCase();
+          if (!title.includes(search) && !user.includes(search) && !canceller.includes(search)) {
+            return false;
+          }
+        }
         return true;
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-gray-400">ไม่พบรายการข้อมูล</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-gray-400">ไม่พบรายการข้อมูล</td></tr>`;
         return;
       }
 
@@ -138,6 +146,9 @@
               <span class="px-2.5 py-1 text-xs rounded-full font-semibold ${isConfirmed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
                 ${isConfirmed ? 'ยืนยันแล้ว' : 'ยกเลิกแล้ว'}
               </span>
+            </td>
+            <td class="py-3 px-4 text-xs font-medium ${b.cancelled_by ? 'text-red-600' : 'text-gray-400'}">
+              ${b.cancelled_by || '-'}
             </td>
             <td class="py-3 px-4 text-center">
               ${isConfirmed ? `
