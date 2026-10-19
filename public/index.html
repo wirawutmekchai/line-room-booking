@@ -86,7 +86,9 @@
 
   function setDefaultDate() {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
-    document.getElementById('booking_date').value = today;
+    const dateInput = document.getElementById('booking_date');
+    dateInput.value = today;
+    dateInput.min = today; // ล็อกไม่ให้เลือกวันที่ผ่านมาแล้วในอดีต
   }
 
   async function initLiff() {
@@ -128,9 +130,15 @@
       return;
     }
 
-    // ตัด +07:00 ออก ส่งเป็นเวลาตรงๆ เพื่อไม่ให้ฐานข้อมูลทดเวลาเพิ่ม
+    // ล็อกเวลาไม่ให้จองเวลาย้อนหลังเทียบกับเวลาปัจจุบันของไทย
     const fullStartTime = `${bookingDate}T${startTimeVal}:00`;
     const fullEndTime = `${bookingDate}T${endTimeVal}:00`;
+
+    const nowThaiStr = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }).replace(' ', 'T');
+    if (fullStartTime < nowThaiStr) {
+      alert('⚠️ ไม่สามารถจองเวลาย้อนหลังได้ กรุณาเลือกช่วงเวลาปัจจุบันหรือล่วงหน้าครับ');
+      return;
+    }
 
     const btn = document.getElementById('submitBtn');
     btn.disabled = true;
