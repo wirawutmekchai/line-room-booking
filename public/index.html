@@ -10,7 +10,7 @@
 <body class="bg-gray-100 min-h-screen p-4 flex items-center justify-center">
   <div class="w-full max-w-md bg-white rounded-xl shadow-md p-6">
     <h1 class="text-2xl font-bold text-gray-800 mb-2">จองห้องประชุม</h1>
-    <div id="user-info" class="text-sm text-gray-500 mb-6">กำลังโหลดข้อมูลผู้ใช้...</div>
+    <div id="user-info" class="text-sm text-gray-500 mb-6">กำลังเชื่อมต่อ LINE...</div>
 
     <form id="booking-form" class="space-y-4">
       <div>
@@ -57,55 +57,50 @@
     const MY_LIFF_ID = "2012070438-neRmVlKc";
     let currentUser = null;
 
-    // 1. ฟังก์ชันสร้างตัวเลือกเวลา 08:00 - 20:00 น. (ล็อกนาที 00 และ 30)
     function populateTimeOptions() {
       const startSelect = document.getElementById('start_time_select');
       const endSelect = document.getElementById('end_time_select');
-      const times = [];
-
       for (let h = 8; h <= 20; h++) {
         const hh = String(h).padStart(2, '0');
-        times.push(`${hh}:00`);
+        startSelect.add(new Option(`${hh}:00 น.`, `${hh}:00`));
+        endSelect.add(new Option(`${hh}:00 น.`, `${hh}:00`));
         if (h < 20) {
-          times.push(`${hh}:30`);
+          startSelect.add(new Option(`${hh}:30 น.`, `${hh}:30`));
+          endSelect.add(new Option(`${hh}:30 น.`, `${hh}:30`));
         }
       }
-
-      times.forEach(t => {
-        startSelect.add(new Option(`${t} น.`, t));
-        endSelect.add(new Option(`${t} น.`, t));
-      });
     }
 
-    // 2. ฟังก์ชันกำหนดวันที่เริ่มต้นเป็นเวลาปัจจุบันในไทย
     function setDefaultDate() {
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
       document.getElementById('booking_date').value = today;
     }
 
-    // 3. เริ่มต้นเชื่อมต่อ LINE LIFF
     async function init() {
       populateTimeOptions();
       setDefaultDate();
 
+      const userInfo = document.getElementById('user-info');
       try {
         await liff.init({ liffId: MY_LIFF_ID });
-        if (!liff.isLoggedIn()) {
+        
+        if (liff.isLoggedIn()) {
+          currentUser = await liff.getProfile();
+          userInfo.innerText = `👤 ผู้จอง: "${currentUser.displayName}"`;
+          userInfo.className = "text-sm text-green-600 font-semibold mb-6";
+        } else {
+          // หากเปิดภายนอก LINE แล้วยังไม่ล็อกอิน
           liff.login();
-          return;
         }
-        currentUser = await liff.getProfile();
-        document.getElementById('user-info').innerText = `👤 ผู้จอง: "${currentUser.displayName}"`;
       } catch (err) {
-        document.getElementById('user-info').innerText = `เข้าสู่ระบบ LINE ไม่สำเร็จ: ${err.message}`;
+        userInfo.innerText = `⚠️ ไม่สามารถดึงโปรไฟล์ LINE: ${err.message}`;
+        userInfo.className = "text-sm text-red-500 mb-6";
       }
     }
 
-    // 4. จัดการการกดปุ่มส่งข้อมูลจองห้อง
     document.getElementById('booking-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (!currentUser) return alert('กรุณารอโหลดข้อมูลผู้ใช้สักครู่');
-
+      
       const date = document.getElementById('booking_date').value;
       const startTime = document.getElementById('start_time_select').value;
       const endTime = document.getElementById('end_time_select').value;
@@ -120,22 +115,21 @@
         return;
       }
 
-      // ล็อก Timezone ประเทศไทย (+07:00) ให้เวลาตรงกันทุกเครื่อง
       const fullStartTime = `${date}T${startTime}:00+07:00`;
       const fullEndTime = `${date}T${endTime}:00+07:00`;
 
+      const btn = document.getElementById('btn-submit');
+      btn.disabled = true;
+      btn.innerText = 'กำลังตรวจสอบห้อง...';
+
       const payload = {
-        user_line_id: currentUser.userId,
-        user_name: currentUser.displayName,
+        user_line_id: currentUser ? currentUser.userId : 'U_MANUAL_TEST',
+        user_name: currentUser ? currentUser.displayName : 'ผู้ใช้ LINE',
         room_id: document.getElementById('room_id').value,
         title: document.getElementById('title').value,
         start_time: fullStartTime,
         end_time: fullEndTime
       };
-
-      const btn = document.getElementById('btn-submit');
-      btn.disabled = true;
-      btn.innerText = 'กำลังตรวจสอบห้อง...';
 
       try {
         const res = await fetch('/api/bookings', {
