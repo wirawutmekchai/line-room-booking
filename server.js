@@ -20,7 +20,7 @@ const lineClient = new line.messagingApi.MessagingApiClient(lineConfig);
 // รายชื่อ LINE User ID ของแอดมิน (ดึงจาก Render Environment)
 const ADMIN_IDS = (process.env.ADMIN_LINE_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
 
-// รหัส PIN เข้าหน้าเว็บ Admin Dashboard (ค่าเริ่มต้น 1234 หากไม่ได้ตั้งใน Render)
+// รหัส PIN สำหรับเข้าใช้งานหน้าเว็บ Admin Dashboard
 const ADMIN_DASHBOARD_PIN = process.env.ADMIN_PIN || '1234';
 
 const CONFLICT_RULES = {
@@ -127,6 +127,7 @@ async function getTodayScheduleFlex() {
 
 // ----------------------------------------------------
 // 2. Flex Message: ดูรายการจองของตนเองเพื่อยกเลิก (ยูสเซอร์ทั่วไป)
+// ดึงเฉพาะรายการที่ยังไม่หมดเวลาประชุมเท่านั้น
 // ----------------------------------------------------
 async function getMyBookingsFlex(userId) {
   const query = `
@@ -134,7 +135,7 @@ async function getMyBookingsFlex(userId) {
     FROM bookings
     WHERE status = 'confirmed'
       AND user_line_id = $1
-      AND end_time >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
+      AND end_time > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
     ORDER BY start_time ASC
     LIMIT 10;
   `;
@@ -204,13 +205,14 @@ async function getMyBookingsFlex(userId) {
 
 // ----------------------------------------------------
 // 3. Flex Message: ดูรายการจองทั้งหมด (สำหรับ ADMIN เท่านั้น)
+// ดึงเฉพาะรายการที่ยังไม่หมดเวลาประชุมเท่านั้น
 // ----------------------------------------------------
 async function getAdminAllBookingsFlex() {
   const query = `
     SELECT id, room_id, title, user_name, start_time, end_time
     FROM bookings
     WHERE status = 'confirmed'
-      AND end_time >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
+      AND end_time > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
     ORDER BY start_time ASC
     LIMIT 10;
   `;
@@ -226,7 +228,7 @@ async function getAdminAllBookingsFlex() {
         contents: [
           { type: 'text', text: '🛡️ เมนูผู้ดูแลระบบ (Admin)', weight: 'bold', size: 'lg', color: '#0055FF' },
           { type: 'separator', margin: 'md' },
-          { type: 'text', text: 'ไม่มีรายการจองค้างอยู่ในระบบครับ', margin: 'lg', color: '#666666', wrap: true }
+          { type: 'text', text: 'ไม่มีรายการจองที่กำลังจะมาถึงในระบบครับ', margin: 'lg', color: '#666666', wrap: true }
         ]
       }
     };
@@ -339,7 +341,7 @@ app.post('/webhook', express.json(), async (req, res) => {
       const action = params.get('action');
       const bookingId = params.get('booking_id');
 
-      // ยูสเซอร์กดยกเลิกของตัวเอง
+      // ยูสเซอร์กดยกเลิกของตัวเอง (ล็อกไม่ให้ยกเลิกรายการที่ผ่านไปแล้ว)
       if (action === 'cancel') {
         let cancellerName = 'เจ้าของคิว';
         try {
@@ -350,7 +352,10 @@ app.post('/webhook', express.json(), async (req, res) => {
         const updateResult = await pool.query(
           `UPDATE bookings 
            SET status = 'cancelled', cancelled_by = $3
-           WHERE id = $1 AND user_line_id = $2 AND status = 'confirmed' 
+           WHERE id = $1 
+             AND user_line_id = $2 
+             AND status = 'confirmed' 
+             AND end_time > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
            RETURNING *;`,
           [bookingId, userId, cancellerName]
         );
@@ -367,12 +372,12 @@ app.post('/webhook', express.json(), async (req, res) => {
         } else {
           await lineClient.replyMessage({
             replyToken: event.replyToken,
-            messages: [{ type: 'text', text: '⚠️ ไม่พบรายการจอง หรือรายการนี้ถูกยกเลิกไปแล้วครับ' }]
+            messages: [{ type: 'text', text: '⚠️ ไม่สามารถยกเลิกได้ (รายการนี้สิ้นสุดการประชุมแล้ว หรือถูกยกเลิกไปแล้วครับ)' }]
           });
         }
       }
 
-      // ADMIN กดยกเลิกผ่านแชต LINE
+      // ADMIN กดยกเลิกผ่านแชต LINE (ล็อกไม่ให้ยกเลิกรายการที่ผ่านไปแล้ว)
       if (action === 'admin_cancel') {
         if (!ADMIN_IDS.includes(userId)) {
           await lineClient.replyMessage({
@@ -391,7 +396,9 @@ app.post('/webhook', express.json(), async (req, res) => {
         const updateResult = await pool.query(
           `UPDATE bookings 
            SET status = 'cancelled', cancelled_by = $2 
-           WHERE id = $1 AND status = 'confirmed' 
+           WHERE id = $1 
+             AND status = 'confirmed' 
+             AND end_time > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
            RETURNING *;`,
           [bookingId, adminName]
         );
@@ -418,7 +425,7 @@ app.post('/webhook', express.json(), async (req, res) => {
         } else {
           await lineClient.replyMessage({
             replyToken: event.replyToken,
-            messages: [{ type: 'text', text: '⚠️ ไม่พบรายการจอง หรือคิวนี้ถูกยกเลิกไปแล้ว' }]
+            messages: [{ type: 'text', text: '⚠️ ไม่สามารถยกเลิกได้ (รายการนี้สิ้นสุดการประชุมแล้ว หรือถูกยกเลิกไปแล้วครับ)' }]
           });
         }
       }
@@ -432,7 +439,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ----------------------------------------------------
-// 5. API จองห้อง
+// 5. API จองห้อง (ล็อกเวลาไม่ให้จองย้อนหลัง)
 // ----------------------------------------------------
 app.post('/api/bookings', async (req, res) => {
   const { user_line_id, user_name, room_id, title, start_time, end_time } = req.body;
@@ -446,8 +453,14 @@ app.post('/api/bookings', async (req, res) => {
     return res.status(400).json({ error: 'ระบุห้องไม่ถูกต้อง' });
   }
 
-  if (new Date(start_time) >= new Date(end_time)) {
+  if (start_time >= end_time) {
     return res.status(400).json({ error: 'เวลาสิ้นสุดต้องมากกว่าเวลาเริ่มต้น' });
+  }
+
+  // ดักไม่ให้จองเวลาย้อนหลังเทียบกับเวลาปัจจุบันของไทย
+  const nowThaiStr = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }).replace(' ', 'T');
+  if (start_time < nowThaiStr) {
+    return res.status(400).json({ error: '⚠️ ไม่สามารถจองห้องประชุมย้อนหลังได้ครับ' });
   }
 
   const client = await pool.connect();
@@ -578,7 +591,7 @@ async function sendBookingConfirmation(userId, booking) {
   await lineClient.pushMessage({ to: userId, messages: [message] });
 }
 
-// ฟังก์ชันส่งแจ้งเตือนการจองใหม่ไปยัง Admin
+// ฟังก์ชันส่งแจ้งเตือนการจองใหม่ไปยัง Admin ทุกคน
 async function notifyAdminsNewBooking(booking, bookerId) {
   if (!ADMIN_IDS.length) return;
 
@@ -672,7 +685,7 @@ app.get('/api/admin/bookings', async (req, res) => {
   }
 });
 
-// 6.2 ยกเลิกการจองผ่านหน้าเว็บ Dashboard
+// 6.2 ยกเลิกการจองผ่านหน้าเว็บ Dashboard (ล็อกไม่ให้ยกเลิกรายการที่ผ่านไปแล้ว)
 app.post('/api/admin/bookings/:id/cancel', async (req, res) => {
   const { key } = req.body;
   const bookingId = req.params.id;
@@ -685,13 +698,15 @@ app.post('/api/admin/bookings/:id/cancel', async (req, res) => {
     const updateResult = await pool.query(
       `UPDATE bookings 
        SET status = 'cancelled', cancelled_by = 'Admin (Dashboard)' 
-       WHERE id = $1 AND status = 'confirmed' 
+       WHERE id = $1 
+         AND status = 'confirmed' 
+         AND end_time > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
        RETURNING *;`,
       [bookingId]
     );
 
     if (updateResult.rows.length === 0) {
-      return res.status(404).json({ error: 'ไม่พบรายการจอง หรือรายการนี้ถูกยกเลิกไปแล้ว' });
+      return res.status(400).json({ error: 'ไม่สามารถยกเลิกได้ เนื่องจากรายการนี้ผ่านไปแล้ว หรือถูกยกเลิกไปแล้ว' });
     }
 
     const item = updateResult.rows[0];
