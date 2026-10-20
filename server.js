@@ -126,8 +126,7 @@ async function getTodayScheduleFlex() {
 }
 
 // ----------------------------------------------------
-// 2. Flex Message: ดูรายการจองของตนเองเพื่อยกเลิก (ยูสเซอร์ทั่วไป)
-// ดึงเฉพาะรายการที่ยังไม่หมดเวลาประชุมเท่านั้น
+// 2. Flex Message: ดูรายการจองของตนเองเพื่อยกเลิก
 // ----------------------------------------------------
 async function getMyBookingsFlex(userId) {
   const query = `
@@ -205,7 +204,6 @@ async function getMyBookingsFlex(userId) {
 
 // ----------------------------------------------------
 // 3. Flex Message: ดูรายการจองทั้งหมด (สำหรับ ADMIN เท่านั้น)
-// ดึงเฉพาะรายการที่ยังไม่หมดเวลาประชุมเท่านั้น
 // ----------------------------------------------------
 async function getAdminAllBookingsFlex() {
   const query = `
@@ -341,7 +339,6 @@ app.post('/webhook', express.json(), async (req, res) => {
       const action = params.get('action');
       const bookingId = params.get('booking_id');
 
-      // ยูสเซอร์กดยกเลิกของตัวเอง (ล็อกไม่ให้ยกเลิกรายการที่ผ่านไปแล้ว)
       if (action === 'cancel') {
         let cancellerName = 'เจ้าของคิว';
         try {
@@ -377,7 +374,6 @@ app.post('/webhook', express.json(), async (req, res) => {
         }
       }
 
-      // ADMIN กดยกเลิกผ่านแชต LINE (ล็อกไม่ให้ยกเลิกรายการที่ผ่านไปแล้ว)
       if (action === 'admin_cancel') {
         if (!ADMIN_IDS.includes(userId)) {
           await lineClient.replyMessage({
@@ -439,7 +435,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ----------------------------------------------------
-// 5. API จองห้อง (ล็อกเวลาไม่ให้จองย้อนหลัง)
+// 5. API จองห้อง
 // ----------------------------------------------------
 app.post('/api/bookings', async (req, res) => {
   const { user_line_id, user_name, room_id, title, start_time, end_time } = req.body;
@@ -457,7 +453,6 @@ app.post('/api/bookings', async (req, res) => {
     return res.status(400).json({ error: 'เวลาสิ้นสุดต้องมากกว่าเวลาเริ่มต้น' });
   }
 
-  // ดักไม่ให้จองเวลาย้อนหลังเทียบกับเวลาปัจจุบันของไทย
   const nowThaiStr = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }).replace(' ', 'T');
   if (start_time < nowThaiStr) {
     return res.status(400).json({ error: '⚠️ ไม่สามารถจองห้องประชุมย้อนหลังได้ครับ' });
@@ -496,8 +491,8 @@ app.post('/api/bookings', async (req, res) => {
     }
 
     const insertQuery = `
-      INSERT INTO bookings (user_line_id, user_name, room_id, title, start_time, end_time, status)
-      VALUES ($1, $2, $3, $4, $5, $6, 'confirmed')
+      INSERT INTO bookings (user_line_id, user_name, room_id, title, start_time, end_time, status, reminded)
+      VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', FALSE)
       RETURNING *;
     `;
     const inserted = await client.query(insertQuery, [
@@ -661,10 +656,89 @@ async function notifyAdminsNewBooking(booking, bookerId) {
 }
 
 // ----------------------------------------------------
-// 6. API สำหรับ Admin Dashboard (Web Admin)
+// 6. ระบบแจ้งเตือนผู้จองก่อนเริ่มประชุม 5 นาที (Reminder Worker)
 // ----------------------------------------------------
+async function checkUpcomingMeetingsAndRemind() {
+  try {
+    // ค้นหารายการที่ได้รับการยืนยัน, ยังไม่ได้เตือน, และจะเริ่มภายใน 5 นาทีข้างหน้า
+    const query = `
+      SELECT id, room_id, title, user_name, user_line_id, start_time, end_time
+      FROM bookings
+      WHERE status = 'confirmed'
+        AND (reminded IS FALSE OR reminded IS NULL)
+        AND start_time > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')
+        AND start_time <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok') + INTERVAL '5 minutes';
+    `;
+    const result = await pool.query(query);
+    const upcomingBookings = result.rows;
 
-// 6.1 ดึงรายการจองทั้งหมด (รวม cancelled_by)
+    for (const b of upcomingBookings) {
+      const sTime = formatThaiTime(b.start_time);
+      const eTime = formatThaiTime(b.end_time);
+
+      const reminderMessage = {
+        type: 'flex',
+        altText: `⏰ เตือน: การประชุม "${b.title}" จะเริ่มในอีก 5 นาที`,
+        contents: {
+          type: 'bubble',
+          header: {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#FF9500',
+            contents: [
+              { type: 'text', text: '⏰ แจ้งเตือน: ใกล้ถึงเวลาประชุมแล้ว', color: '#ffffff', weight: 'bold', size: 'md' }
+            ]
+          },
+          body: {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'md',
+            contents: [
+              { type: 'text', text: b.title, weight: 'bold', size: 'lg' },
+              {
+                type: 'text',
+                text: 'การประชุมของคุณจะเริ่มในอีก 5 นาทีข้างหน้าครับ กรุณาเตรียมตัวเข้าห้องประชุม',
+                size: 'xs',
+                color: '#666666',
+                wrap: true
+              },
+              { type: 'separator', margin: 'sm' },
+              {
+                type: 'box',
+                layout: 'vertical',
+                spacing: 'xs',
+                contents: [
+                  { type: 'text', text: `📍 ห้อง: ${ROOM_NAMES[b.room_id]}`, size: 'sm', color: '#333333', weight: 'bold' },
+                  { type: 'text', text: `⏰ เวลา: ${sTime} - ${eTime} น.`, size: 'sm', color: '#FF9500', weight: 'bold' }
+                ]
+              }
+            ]
+          }
+        }
+      };
+
+      try {
+        if (b.user_line_id && b.user_line_id.startsWith('U')) {
+          await lineClient.pushMessage({ to: b.user_line_id, messages: [reminderMessage] });
+        }
+        // อัปเดต reminded เป็น TRUE ทันที เพื่อไม่ให้ส่งเตือนซ้ำ
+        await pool.query(`UPDATE bookings SET reminded = TRUE WHERE id = $1;`, [b.id]);
+        console.log(`[Reminder] ส่งแจ้งเตือนการประชุม ID: ${b.id} ให้คุณ ${b.user_name} สำเร็จ`);
+      } catch (sendErr) {
+        console.error(`[Reminder] ส่งแจ้งเตือนล้มเหลว (ID: ${b.id}):`, sendErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('[Reminder Worker Error]:', err.message);
+  }
+}
+
+// ตั้งเวลาให้ตรวจเช็กทุกๆ 60 วินาที (1 นาที)
+setInterval(checkUpcomingMeetingsAndRemind, 60 * 1000);
+
+// ----------------------------------------------------
+// 7. API สำหรับ Admin Dashboard (Web Admin)
+// ----------------------------------------------------
 app.get('/api/admin/bookings', async (req, res) => {
   const { key } = req.query;
   if (key !== ADMIN_DASHBOARD_PIN) {
@@ -685,7 +759,6 @@ app.get('/api/admin/bookings', async (req, res) => {
   }
 });
 
-// 6.2 ยกเลิกการจองผ่านหน้าเว็บ Dashboard (ล็อกไม่ให้ยกเลิกรายการที่ผ่านไปแล้ว)
 app.post('/api/admin/bookings/:id/cancel', async (req, res) => {
   const { key } = req.body;
   const bookingId = req.params.id;
