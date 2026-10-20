@@ -55,65 +55,66 @@ function formatThaiDate(dateInput) {
 }
 
 // ----------------------------------------------------
-// 1. Flex Message: ดูตารางห้องวันนี้ (สำหรับทุกคน)
+// 1. Flex Message: ดูตารางห้องประชุมตามวันที่ระบุ (พร้อมปุ่มเลือกดูวันอื่น)
 // ----------------------------------------------------
-async function getTodayScheduleFlex() {
+async function getScheduleFlexByDate(targetDateStr) {
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+  const dateToQuery = targetDateStr || todayStr;
+
   const query = `
     SELECT room_id, title, user_name, start_time, end_time
     FROM bookings
     WHERE status = 'confirmed'
-      AND (start_time AT TIME ZONE 'Asia/Bangkok')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Bangkok')::date
+      AND (start_time AT TIME ZONE 'Asia/Bangkok')::date = $1::date
     ORDER BY start_time ASC;
   `;
-  const result = await pool.query(query);
+  const result = await pool.query(query, [dateToQuery]);
   const bookings = result.rows;
 
-  const dateFormatted = new Date().toLocaleDateString('th-TH', { 
+  const d = new Date(`${dateToQuery}T00:00:00+07:00`);
+  const dateFormatted = d.toLocaleDateString('th-TH', { 
     dateStyle: 'medium', 
     timeZone: 'Asia/Bangkok' 
   });
 
-  if (bookings.length === 0) {
-    return {
-      type: 'bubble',
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          { type: 'text', text: '📅 ตารางห้องประชุมวันนี้', weight: 'bold', size: 'lg', color: '#1DB446' },
-          { type: 'text', text: dateFormatted, size: 'xs', color: '#888888', margin: 'xs' },
-          { type: 'separator', margin: 'md' },
-          { type: 'text', text: '✨ วันนี้ยังไม่มีรายการจอง ว่างตลอดทั้งวันครับ', margin: 'lg', color: '#555555', wrap: true }
-        ]
-      }
-    };
-  }
+  const isToday = (dateToQuery === todayStr);
+  const titleHeader = isToday ? '📅 ตารางห้องประชุมวันนี้' : `📅 ตารางห้องประชุม`;
 
   const contents = [
-    { type: 'text', text: '📅 ตารางการจองวันนี้', weight: 'bold', size: 'lg', color: '#1DB446' },
+    { type: 'text', text: titleHeader, weight: 'bold', size: 'lg', color: '#1DB446' },
     { type: 'text', text: dateFormatted, size: 'xs', color: '#888888', margin: 'xs' },
     { type: 'separator', margin: 'md' }
   ];
 
-  bookings.forEach((b) => {
-    const sTime = formatThaiTime(b.start_time);
-    const eTime = formatThaiTime(b.end_time);
-
+  if (bookings.length === 0) {
     contents.push({
-      type: 'box',
-      layout: 'vertical',
-      margin: 'md',
-      paddingAll: '8px',
-      backgroundColor: '#F7F8F9',
-      cornerRadius: '8px',
-      contents: [
-        { type: 'text', text: `${sTime} - ${eTime} น.`, weight: 'bold', size: 'sm', color: '#00B900' },
-        { type: 'text', text: `📍 ${ROOM_NAMES[b.room_id] || b.room_id}`, size: 'xs', weight: 'bold', color: '#333333', margin: 'xs' },
-        { type: 'text', text: `หัวข้อ: ${b.title}`, size: 'xs', color: '#555555' },
-        { type: 'text', text: `ผู้จอง: ${b.user_name}`, size: 'xs', color: '#888888' }
-      ]
+      type: 'text',
+      text: '✨ วันนี้ยังไม่มีรายการจอง ว่างตลอดทั้งวันครับ',
+      margin: 'lg',
+      color: '#555555',
+      wrap: true
     });
-  });
+  } else {
+    bookings.forEach((b) => {
+      const sTime = formatThaiTime(b.start_time);
+      const eTime = formatThaiTime(b.end_time);
+
+      contents.push({
+        type: 'box',
+        layout: 'vertical',
+        margin: 'md',
+        paddingAll: '8px',
+        backgroundColor: '#F7F8F9',
+        cornerRadius: '8px',
+        contents: [
+          { type: 'text', text: `${sTime} - ${eTime} น.`, weight: 'bold', size: 'sm', color: '#00B900' },
+          { type: 'text', text: `📍 ${ROOM_NAMES[b.room_id] || b.room_id}`, size: 'xs', weight: 'bold', color: '#333333', margin: 'xs' },
+          { type: 'text', text: `หัวข้อ: ${b.title}`, size: 'xs', color: '#555555' },
+          { type: 'text', text: `ผู้จอง: ${b.user_name}`, size: 'xs', color: '#888888' }
+        ]
+      });
+    });
+  }
 
   return {
     type: 'bubble',
@@ -121,6 +122,26 @@ async function getTodayScheduleFlex() {
       type: 'box',
       layout: 'vertical',
       contents: contents
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'button',
+          style: 'secondary',
+          color: '#06C755',
+          height: 'sm',
+          action: {
+            type: 'datetimepicker',
+            label: '📅 เลือกดูวันอื่น',
+            data: 'action=check_schedule_date',
+            mode: 'date',
+            initial: dateToQuery,
+            min: todayStr
+          }
+        }
+      ]
     }
   };
 }
@@ -303,12 +324,22 @@ app.post('/webhook', express.json(), async (req, res) => {
         continue;
       }
 
+      // ดักคำสั่งเช็กห้อง (รองรับคำว่า "พรุ่งนี้" หรือเลือกวัน)
       if (['เช็กห้อง', 'เช็คห้อง', 'ตารางห้อง', 'ดูห้อง', 'มีห้องว่างไหม'].some(kw => text.includes(kw))) {
-        const flex = await getTodayScheduleFlex();
+        let targetDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+
+        if (text.includes('พรุ่งนี้')) {
+          const tmr = new Date();
+          tmr.setDate(tmr.getDate() + 1);
+          targetDate = tmr.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+        }
+
+        const flex = await getScheduleFlexByDate(targetDate);
         await lineClient.replyMessage({
           replyToken: event.replyToken,
-          messages: [{ type: 'flex', altText: 'ตารางการจองห้องประชุมวันนี้', contents: flex }]
+          messages: [{ type: 'flex', altText: 'ตารางการจองห้องประชุม', contents: flex }]
         });
+        continue;
       } else if (['ยกเลิก', 'ยกเลิกห้อง', 'ยกเลิกการจอง'].some(kw => text.includes(kw))) {
         const flex = await getMyBookingsFlex(userId);
         await lineClient.replyMessage({
@@ -339,6 +370,20 @@ app.post('/webhook', express.json(), async (req, res) => {
       const action = params.get('action');
       const bookingId = params.get('booking_id');
 
+      // ผู้ใช้กดเลือกดูวันอื่นจากปุ่มปฏิทิน
+      if (action === 'check_schedule_date') {
+        const selectedDate = event.postback.params && event.postback.params.date;
+        if (selectedDate) {
+          const flex = await getScheduleFlexByDate(selectedDate);
+          await lineClient.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{ type: 'flex', altText: `ตารางห้องประชุมวันที่ ${selectedDate}`, contents: flex }]
+          });
+        }
+        continue;
+      }
+
+      // ยูสเซอร์กดยกเลิกของตัวเอง
       if (action === 'cancel') {
         let cancellerName = 'เจ้าของคิว';
         try {
@@ -374,6 +419,7 @@ app.post('/webhook', express.json(), async (req, res) => {
         }
       }
 
+      // ADMIN กดยกเลิกผ่านแชต LINE
       if (action === 'admin_cancel') {
         if (!ADMIN_IDS.includes(userId)) {
           await lineClient.replyMessage({
@@ -660,7 +706,6 @@ async function notifyAdminsNewBooking(booking, bookerId) {
 // ----------------------------------------------------
 async function checkUpcomingMeetingsAndRemind() {
   try {
-    // ค้นหารายการที่ได้รับการยืนยัน, ยังไม่ได้เตือน, และจะเริ่มภายใน 5 นาทีข้างหน้า
     const query = `
       SELECT id, room_id, title, user_name, user_line_id, start_time, end_time
       FROM bookings
@@ -721,9 +766,8 @@ async function checkUpcomingMeetingsAndRemind() {
         if (b.user_line_id && b.user_line_id.startsWith('U')) {
           await lineClient.pushMessage({ to: b.user_line_id, messages: [reminderMessage] });
         }
-        // อัปเดต reminded เป็น TRUE ทันที เพื่อไม่ให้ส่งเตือนซ้ำ
         await pool.query(`UPDATE bookings SET reminded = TRUE WHERE id = $1;`, [b.id]);
-        console.log(`[Reminder] ส่งแจ้งเตือนการประชุม ID: ${b.id} ให้คุณ ${b.user_name} สำเร็จ`);
+        console.log(`[Reminder] ส่งแจ้งเตือนการประชุม ID: ${b.id} สำเร็จ`);
       } catch (sendErr) {
         console.error(`[Reminder] ส่งแจ้งเตือนล้มเหลว (ID: ${b.id}):`, sendErr.message);
       }
@@ -733,7 +777,7 @@ async function checkUpcomingMeetingsAndRemind() {
   }
 }
 
-// ตั้งเวลาให้ตรวจเช็กทุกๆ 60 วินาที (1 นาที)
+// ตั้งเวลาให้ตรวจเช็กทุกๆ 60 วินาที
 setInterval(checkUpcomingMeetingsAndRemind, 60 * 1000);
 
 // ----------------------------------------------------
